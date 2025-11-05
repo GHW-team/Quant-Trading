@@ -1,0 +1,36 @@
+# Docker 빌드 시 제외할 파일들
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 데이터 파일 (용량 큰 파일 제외)
+data/
+*.db
+*.csv
+*.parquet
+
+# 개발 환경
+.venv/
+venv/
+.env
+.vscode/
+.idea/
+
+# Git 관련
+.git/
+.gitignore
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 기타
+*.log
+.DS_Store
