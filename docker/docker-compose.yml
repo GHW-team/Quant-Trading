@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # 데이터 수집 서비스
+  data-collector:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: quant_data_collector
+    volumes:
+      # 로컬 폴더와 컨테이너 폴더 연결 (동기화)
+      - ../data:/app/data
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+    environment:
+      - PYTHONUNBUFFERED=1
+    profiles:
+      - data_collecting
+    command: python scripts/collect_data.py
+    # 네트워크 설정 (선택사항)
+    networks:
+      - quant-network
+
+  # Jupyter Notebook 서비스 (개발용)
+  jupyter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: quant_jupyter
+    ports:
+      - "8888:8888"  # 로컬:컨테이너
+    volumes:
+      - ../notebooks:/app/notebooks
+      - ../data:/app/data
+      - ../src:/app/src
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    profiles:
+      - jupyter
+    command: >
+      jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+    networks:
+      - quant-network
+
+  # 백테스팅 서비스 (나중에 추가)
+  backtester:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: quant_backtester
+    volumes:
+      - ../data:/app/data
+      - ../src:/app/src
+    environment:
+      - PYTHONUNBUFFERED=1
+    # 필요할 때만 실행
+    profiles:
+      - backtesting
+    networks:
+      - quant-network
+
+  # Jupyter Notebook 서비스 (개발용)
+  development:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: quant_dev
+    volumes:
+      - ../notebooks:/app/notebooks
+      - ../data:/app/data
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+      - ../config:/app/config
+      - ../tests:/app/tests
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: sleep infinity
+    networks:
+      - quant-network
+
+networks:
+  quant-network:
+    driver: bridge

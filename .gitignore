@@ -205,3 +205,46 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# 환경 변수 (민감 정보)
+.env
+
+# 데이터 파일 (용량 큰 파일)
+data/database/*.db
+data/raw/*.csv
+*.parquet
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 로그
+*.log
+
+# Docker (이미지는 제외)
+# docker-compose.override.yml은 개인 설정용
+docker-compose.override.yml
