@@ -248,3 +248,7 @@ Thumbs.db
 # Docker (이미지는 제외)
 # docker-compose.override.yml은 개인 설정용
 docker-compose.override.yml
+
+
+#클로드 개인설정
+.claude/
