@@ -65,7 +65,7 @@ services:
     networks:
       - quant-network
 
-  # Jupyter Notebook 서비스 (개발용)
+  # developmnet 서비스 (개발용)
   development:
     build:
       context: ..

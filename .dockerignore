@@ -34,3 +34,6 @@ venv/
 # 기타
 *.log
 .DS_Store
+
+#클로드 개인설정
+.claude/
