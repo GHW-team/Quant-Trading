@@ -136,3 +136,5 @@ docker system prune -a
 docker-compose build --no-cache 
 # 5. 실행 
 docker-compose up -d
+
+==================================================================
