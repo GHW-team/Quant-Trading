@@ -86,26 +86,28 @@ class DatabaseManager:
             저장된 행 수
         """
         ticker_id = self.get_or_create_ticker(ticker_code)
+        #이 함수는 ticker_code하나 가지고 그 종목에 대한 정보들만 저장하는건지
+        #아니면 ticker_code리스트를 받아서 처리할 수 있는건지.
         
         # DataFrame 전처리
         df_reset = df.reset_index()
-        df_reset.rename(columns={'Date': 'date'}, inplace=True)
+        df_reset.rename(columns={'Date': 'date'}, inplace=True)#?? inplace가 뭐지. 그리고 없어도되는 줄 아닌가.
         
         # 컬럼명 소문자 변환
         df_reset.columns = df_reset.columns.str.lower()
         
         # adjusted_close 처리
         if 'adj close' in df_reset.columns:
-            df_reset.rename(columns={'adj close': 'adjusted_close'}, inplace=True)
+            df_reset.rename(columns={'adj close': 'adjusted_close'}, inplace=True)#?? 왜 adj_close로 안함
         elif 'adjusted_close' not in df_reset.columns:
             df_reset['adjusted_close'] = df_reset['close']
         
         # 필요한 컬럼만 선택
         df_save = df_reset[['date', 'open', 'high', 'low', 'close', 'volume', 'adjusted_close']].copy()
-        df_save['ticker_id'] = ticker_id
+        df_save['ticker_id'] = ticker_id 
         
         # 딕셔너리 리스트로 변환
-        records = df_save.to_dict(orient='records')
+        records = df_save.to_dict(orient='records') #딕셔너리 리스트가 뭐지.
         
         # SQLAlchemy Core로 bulk insert
         if update_if_exists:
@@ -113,8 +115,8 @@ class DatabaseManager:
             stmt = sqlite_insert(DailyPrice.__table__).values(records)
             stmt = stmt.on_conflict_do_update(
                 index_elements=['ticker_id', 'date'],
-                set_=dict(
-                    open=stmt.excluded.open,
+                set_=dict(#??: 이건 무슨구조지.
+                    open=stmt.excluded.open,#??: excluded는 뭐야
                     high=stmt.excluded.high,
                     low=stmt.excluded.low,
                     close=stmt.excluded.close,
@@ -169,7 +171,7 @@ class DatabaseManager:
         df_save['calculation_version'] = version
         
         # NaN을 None으로 변환 (SQL NULL)
-        df_save = df_save.where(pd.notnull(df_save), None)
+        df_save = df_save.where(pd.notnull(df_save), None)# ??: where의 자세한 문법 파악
         
         # 딕셔너리 리스트로 변환
         records = df_save.to_dict(orient='records')
@@ -208,14 +210,17 @@ class DatabaseManager:
             dp.volume,
             dp.adjusted_close
         FROM daily_prices dp
-        JOIN tickers t ON dp.ticker_id = t.ticker_id
+        JOIN tickers t ON dp.ticker_id = t.ticker_id 
         WHERE t.ticker_code = :ticker_code
         """
+        #??:왜 join을 썼는지
+        #??: :ticker_code는 무슨 문법인지.
         
         params = {'ticker_code': ticker_code}
         
         if start_date:
             query += " AND dp.date >= :start_date"
+            #??:이게 뭐지
             params['start_date'] = start_date
         
         if end_date:
@@ -225,6 +230,7 @@ class DatabaseManager:
         query += " ORDER BY dp.date"
         
         df = pd.read_sql(query, self.engine, params=params, parse_dates=['date'])
+        #??: engine들어가는거면 pandas가 SQLAlchemy와 연동된건가? 근데 기본함수가 어떻게?
         df.set_index('date', inplace=True)
         
         return df
@@ -282,7 +288,7 @@ class DatabaseManager:
     def close(self):
         """연결 종료"""
         self.session.close()
-        self.engine.dispose()
+        self.engine.dispose()#단어뜻
         logger.info("Database connection closed")
     
     def __enter__(self):

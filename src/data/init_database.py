@@ -26,6 +26,11 @@ def init_database(db_path: str = "data/database/stocks.db"):
         #추가 항목 후보
         # sector / 상장폐지 여부 / 생성,업데이트 시간
         # Trigger 활용.
+    # 인덱스 생성
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_tickers_code 
+    ON tickers(ticker_code)
+    """)
     
     # 2. daily_prices 테이블
     cursor.execute("""
@@ -38,11 +43,16 @@ def init_database(db_path: str = "data/database/stocks.db"):
         low REAL NOT NULL,
         close REAL NOT NULL,
         volume INTEGER NOT NULL,
-        adjusted_close REAL,
+        adj_close REAL,
         retrieved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (ticker_id) REFERENCES tickers(ticker_id),
         UNIQUE(ticker_id, date)
     )
+    """)
+    # 인덱스 생성
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_daily_prices_ticker_date 
+    ON daily_prices(ticker_id, date DESC)
     """)
 
     
@@ -64,21 +74,10 @@ def init_database(db_path: str = "data/database/stocks.db"):
     """)
     #indicator_type VARCHAR(20) NOT NULL,    -- 예: 'MA', 'MACD', 'RSI' 이 형식은 어떤지
     #
-    
     # 인덱스 생성
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_daily_prices_ticker_date 
-    ON daily_prices(ticker_id, date DESC)
-    """)
-    
     cursor.execute("""
     CREATE INDEX IF NOT EXISTS idx_indicators_ticker_date 
     ON technical_indicators(ticker_id, date DESC)
-    """)
-    
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_tickers_code 
-    ON tickers(ticker_code)
     """)
     
     conn.commit()
