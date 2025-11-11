@@ -1,99 +1,115 @@
-# Quant-Trading
+# 🚀 ML 퀀트 트레이딩 시스템
 
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
 
-# 🚀 머신러닝 퀀트 트레이딩 시스템
+> **절대 모멘텀 전략 기반 한국 주식 자동매매 시스템 (개발 중)**
 
-## 팀원
-- 경제 전문가: [이름]
-- 데이터 사이언티스트: [이름]
-- 머신러닝 엔지니어: [이름]
+대학생 3명이 처음 만드는 머신러닝 퀀트 트레이딩 토이 프로젝트
 
-## 프로젝트 설명
-절대 모멘텀 전략 기반 한국 주식 자동매매 시스템
+---
 
-## 🛠️ 개발 환경 설정
+## 📋 프로젝트 개요
 
-### 1. 사전 준비
-- Docker Desktop 설치 (https://www.docker.com/products/docker-desktop)
-- Git 설치
-- GitHub 계정
+**투자 전략**: 절대 모멘텀 (Absolute Momentum)
+- 기술적 지표(이동평균선, MACD)로 모멘텀 포착
+- 머신러닝(Logistic Regression)으로 매수/매도 예측
 
-### 2. 프로젝트 클론
-\`\`\`bash
-git clone https://github.com/your-team/quant_project.git
-cd quant_project
-\`\`\`
+**개발 목표**
+1. 데이터 수집 및 저장 자동화
+2. 기술 지표 계산 및 피처 생성
+3. ML 모델 학습 및 백테스팅
+4. 키움증권 API 연동 실전 매매
 
-### 3. 환경 변수 설정
-\`\`\`bash
+**팀**: 경제학 + 데이터 사이언스 + 머신러닝 지망 대학생
+
+---
+
+## 🏗️ 시스템 구조
+
+```
+yfinance (주가 수집)
+    ↓
+SQLite (OHLCV + 기술지표 저장)
+    ↓
+Feature Engineering (피처 생성)
+    ↓
+ML Model (모멘텀 예측)
+    ↓
+Backtrader (백테스팅)
+    ↓
+키움증권 API (실전 매매)
+```
+
+---
+
+## 🛠️ 기술 스택
+
+| 분야 | 기술 |
+|------|------|
+| **데이터 수집** | yfinance |
+| **데이터베이스** | SQLite + SQLAlchemy |
+| **기술 지표** | pandas-ta-classic |
+| **머신러닝** | scikit-learn |
+| **백테스팅** | Backtrader |
+| **실전 매매** | 키움증권 API |
+| **개발 환경** | Docker |
+
+---
+
+## 📂 프로젝트 구조
+
+```
+src/
+├── data/              # 데이터 수집 및 처리
+│   ├── data_fetcher.py       # yfinance 주가 수집
+│   ├── db_manager.py         # SQLite 관리
+│   ├── indicator_calculator.py  # 기술 지표 계산
+│   └── pipeline.py           # 자동화 파이프라인
+├── models/            # ML 모델 (개발 예정)
+├── backtest/          # 백테스팅 (개발 예정)
+└── execution/         # 실전 매매 (개발 예정)
+```
+
+---
+
+## 🚀 빠른 시작
+
+### Docker로 실행
+```bash
+git clone https://github.com/your-team/Quant-Trading.git
+cd Quant-Trading/docker
 cp .env.example .env
-# .env 파일을 열어서 본인의 API 키 입력
-\`\`\`
-
-### 4. Docker 실행
-\`\`\`bash
-# 이미지 빌드 및 실행
 docker-compose up --build
 
-# 백그라운드 실행
-docker-compose up -d
+## 📝 개발 진행 상황
 
-# 특정 서비스만 실행
-docker-compose up jupyter
-\`\`\`
+### ✅ 완료
+- Docker 환경 구축
 
-### 5. Jupyter 접속
-브라우저에서 http://localhost:8888 접속
+### 🔄 진행 중
+- yfinance 데이터 수집 모듈
+- SQLite 데이터베이스 (OHLCV, 기술지표)
+- 기술 지표 계산 (MA, MACD, RSI, Bollinger Bands)
+- 자동화 데이터 파이프라인
 
-## 📦 주요 명령어
+### 🔜 예정
+- 피처 엔지니어링
+- 모멘텀 레이블링
+- 백테스팅 (거래 비용, 성과 지표)
+- 키움증권 API 연동
+- 자동매매 시스템
 
-\`\`\`bash
-# 컨테이너 상태 확인
-docker-compose ps
+---
 
-# 로그 확인
-docker-compose logs -f
+## 👥 팀원
 
-# 컨테이너 중지
-docker-compose down
+경제 전문가 | 데이터 사이언티스트 | 머신러닝 엔지니어
 
-# 데이터 수집 실행
-docker-compose run data-collector python scripts/collect_data.py
+---
 
-# 테스트 실행
-docker-compose run data-collector pytest tests/
-\`\`\`
+<div align="center">
 
-## 📂 디렉토리 구조
-@
-Quant-Trading/
-	README.md
-	.gitignore
-	.env.example
-	requirements.txt
-	setup.py
-	docker/
-	config/
-	data/
-		raw/
-		processed/
-		features/
-		database/
-	src/
-		data/
-		models/
-		backtest/
-		execution/
-	scripts/
-	notebooks/
-	tests/
-	logs/
-	models/
-	reports/
-	docs/[위에서 만든 구조 붙여넣기]
+**Built by College Students Learning Quant Trading 📈**
 
-## 🤝 기여 방법
-1. 브랜치 생성: \`git checkout -b feature/기능명/사용자명\`
-2. 작업 후 커밋: \`git commit -am "설명"\`
-3. 푸시: \`git push origin feature/기능명/사용자명\`
-4. Pull Request 생성
+</div>
