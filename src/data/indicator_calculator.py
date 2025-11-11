@@ -11,12 +11,22 @@ logger = logging.getLogger(__name__)
 class IndicatorCalculator:
     """기술적 지표 계산 클래스"""
 
-    # 지표별 계산 함수 매핑 (확장 가능한 구조)
+    # 지표별 계산 함수 매핑 (확장 가능한 구조), #추가: SMA와 EMA 구분
     INDICATOR_FUNCTIONS = {
-        'ma_5': lambda df: ta.sma(df['close'], length=5),
-        'ma_20': lambda df: ta.sma(df['close'], length=20),
-        'ma_200': lambda df: ta.sma(df['close'], length=200),
+        'sma_5': lambda df: ta.sma(df['close'], length=5),
+        'sma_20': lambda df: ta.sma(df['close'], length=20),
+        'sma_50' : lambda df: ta.sma(df['close'], length=50),
+        'sma_60' : lambda df: ta.sma(df['close'], length=60),
+        'sma_120': lambda df: ta.sma(df['close'], length=120),
+        'sma_200': lambda df: ta.sma(df['close'], length=200),
         'macd': lambda df: ta.macd(df['close'], fast=12, slow=26, signal=9),
+        'ema_5': lambda df: ta.ema(df['close'], length=5),
+        'ema_20': lambda df: ta.ema(df['close'], length=20),
+        'ema_50': lambda df: ta.ema(df['close'], length=50),
+        'ema_60': lambda df: ta.ema(df['close'], length=60),
+        'ema_120': lambda df: ta.ema(df['close'], length=120),
+        'ema_200': lambda df: ta.ema(df['close'], length=200)
+
     }
 
     def __init__(self):
@@ -123,11 +133,48 @@ class IndicatorCalculator:
                 elif indicator == 'ma_200':
                     result_df['ma_200'] = self._calculate_ma(df['close'], 200)
                     logger.debug(f"✓ Calculated ma_200")
+                
+                elif indicator == 'ma_50':
+                    result_df['ma_50'] = self._calculate_ma(df['close'], 50)
+                    logger.debug(f"✓ Calculated ma_50")
+
+                elif indicator == 'ma_60':
+                    result_df['ma_60'] = self._calculate_ma(df['close'], 60)
+                    logger.debug(f"✓ Calculated ma_60")
+
+                elif indicator == 'ma_120':
+                    result_df['ma_120'] = self._calculate_ma(df['close'], 120)
+                    logger.debug(f"✓ Calculated ma_120")
 
                 elif indicator == 'macd':
                     macd_df = self._calculate_macd(df['close'])
                     result_df['macd'] = macd_df['macd']
                     logger.debug(f"✓ Calculated macd")
+                
+                elif indicator == 'ema_5':
+                    result_df['ema_5'] = ta.ema(df['close'], length=5)
+                    logger.debug(f"✓ Calculated ema_5")
+
+                elif indicator == 'ema_20':
+                    result_df['ema_20'] = ta.ema(df['close'], length=20)
+                    logger.debug(f"✓ Calculated ema_20")
+                
+                elif indicator == 'ema_50':
+                    result_df['ema_50'] = ta.ema(df['close'], length=50)
+                    logger.debug(f"✓ Calculated ema_50")
+
+                elif indicator == 'ema_60':
+                    result_df['ema_60'] = ta.ema(df['close'], length=60)
+                    logger.debug(f"✓ Calculated ema_60")
+                
+                elif indicator =='ema_120':
+                    result_df['ema_120'] = ta.ema(df['close'], length=120)
+                    logger.debug(f"✓ Calculated ema_120")
+                    
+                elif indicator == 'ema_200':
+                    result_df['ema_200'] = ta.ema(df['close'], length=200)
+                    logger.debug(f"✓ Calculated ema_200")
+
 
             except Exception as e:
                 logger.error(f"Error calculating {indicator}: {str(e)}")
