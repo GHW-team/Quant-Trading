@@ -1,79 +1,144 @@
-# src/data/db_manager.py - 데이터 저장 관리
+#DatabaseManager
 
-import sqlite3
 import pandas as pd
-from typing import Optional, Dict, List
-from pathlib import Path
-from sqlalchemy import create_engine, insert, select, update
+import numpy as np
+from typing import Optional,List
+from sqlalchemy import create_engine,select,and_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from src.data.models import Base,Ticker,DailyPrice,TechnicalIndicator
+from pathlib import Path
 import logging
 
-from .models import Base, Ticker, DailyPrice, TechnicalIndicator
+#test
+from src.data.data_fetcher import StockDataFetcher
 
 logger = logging.getLogger(__name__)
 
-
-class DatabaseManager:
+class DatabaseManager():
     """데이터베이스 관리 클래스"""
-    
+
     def __init__(self, db_path: str = "data/database/stocks.db"):
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        
-        # SQLAlchemy 엔진
+
+        #SQLAlchemy 엔진
         self.engine = create_engine(
             f'sqlite:///{db_path}',
             echo=False,
-            pool_pre_ping=True  # 연결 유효성 검사
+            pool_pre_ping=True,
         )
-        
-        # 세션 팩토리
+
+        #세션 팩토리
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
-        
-        # 테이블 생성
+
+        #테이블 생성
         Base.metadata.create_all(self.engine)
         logger.info(f"Database initialized: {db_path}")
     
-    def get_or_create_ticker(
-        self, 
-        ticker_code: str, 
-        name: Optional[str] = None,
-        market: str = "KOSPI",
-        sector: Optional[str] = None
-    ) -> int:
+    # 헬퍼 함수 추가 (내부적으로 사용)
+    def _infer_market_from_ticker(self, ticker_code: str) -> str:
+        """티커 문자열을 분석해 시장 정보를 추론"""
+        ticker_upper = ticker_code.upper()
+
+        # 한국 시장
+        if ticker_upper.endswith('.KS'):
+            return 'KOSPI'
+        if ticker_upper.endswith('.KQ'):
+            return 'KOSDAQ'
+        
+        # 암호화폐 (BTC-USD 등)
+        if '-USD' in ticker_upper:
+            return 'CRYPTO'
+            
+        # 일본
+        if ticker_upper.endswith('.T'):
+            return 'TOKYO'
+            
+        # 홍콩
+        if ticker_upper.endswith('.HK'):
+            return 'HONGKONG'
+
+        # 점(.)이 없으면 대부분 미국 주식 (NYSE, NASDAQ, AMEX 등)
+        # 주의: 티커 문자열만으로는 NYSE인지 NASDAQ인지 구분이 불가능함 -> 통칭 'US'로 저장
+        if '.' not in ticker_upper:
+            return 'US'
+            
+        return 'UNKNOWN'
+
+    def get_ticker_id(
+        self,
+        ticker_code: str,
+        market: Optional[str] = None,
+    ):
         """
         종목 조회 또는 생성
         
         Returns:
             ticker_id
         """
-        # 기존 종목 조회
+        
+        #티커 아이디 가져오기
         ticker = self.session.query(Ticker).filter_by(ticker_code=ticker_code).first()
         
         if ticker:
             return ticker.ticker_id
-        
-        # 새 종목 생성
+
+        # 만약 market 인자가 안 들어왔다면, 티커 코드로 추론한다.
+        if market is None:
+            market = self._infer_market_from_ticker(ticker_code)
+
+        #db에 없으면 추가
         new_ticker = Ticker(
             ticker_code=ticker_code,
-            name=name,
             market=market,
-            sector=sector
         )
+
         self.session.add(new_ticker)
         self.session.commit()
-        
+
         logger.info(f"✓ Created ticker: {ticker_code} (ID: {new_ticker.ticker_id})")
         return new_ticker.ticker_id
-    
-    def save_price_data_bulk(
+
+    def save_ticker_metadata(
         self, 
         ticker_code: str, 
-        df: pd.DataFrame,
-        update_if_exists: bool = False
-    ) -> int:
+        metadata: dict,
+    ):
+        """
+        종목의 상세 메타데이터(이름, 섹터, 산업, 시가총액 등)를 업데이트
+        """
+        ticker = self.session.query(Ticker).filter_by(ticker_code=ticker_code).first()
+        
+        if not ticker:
+            logger.warning(f"Ticker {ticker_code} not found. Create it first.")
+            return
+
+        # 메타데이터 딕셔너리를 이용해 업데이트
+        updated = False
+        if 'name' in metadata and ticker.name != metadata['name']:
+            ticker.name = metadata['name']
+            updated = True
+            
+        if 'sector' in metadata and ticker.sector != metadata['sector']:
+            ticker.sector = metadata['sector']
+            updated = True
+            
+        # 나중에 항목이 늘어나면 여기에 if문만 추가하면 됩니다.
+        # if 'industry' in metadata...
+        # if 'ceo' in metadata...
+
+        if updated:
+            self.session.commit()
+            logger.info(f"Updated metadata for {ticker_code}")
+
+    def save_price_data(
+        self,
+        ticker_code,
+        stock_df: pd.DataFrame,
+        update_if_exists: bool,
+    )-> int:
         """
         가격 데이터 대량 저장 (SQLAlchemy Core 사용)
         
@@ -85,61 +150,55 @@ class DatabaseManager:
         Returns:
             저장된 행 수
         """
-        ticker_id = self.get_or_create_ticker(ticker_code)
-        #이 함수는 ticker_code하나 가지고 그 종목에 대한 정보들만 저장하는건지
-        #아니면 ticker_code리스트를 받아서 처리할 수 있는건지.
-        
-        # DataFrame 전처리
-        df_reset = df.reset_index()
-        df_reset.rename(columns={'Date': 'date'}, inplace=True)#?? inplace가 뭐지. 그리고 없어도되는 줄 아닌가.
-        
-        # 컬럼명 소문자 변환
+        ticker_id = self.get_ticker_id(ticker_code)
+
+        #stock_preprocess
+        df_reset = stock_df.reset_index()
+
+        df_reset.columns = df_reset.columns.str.strip()
         df_reset.columns = df_reset.columns.str.lower()
-        
-        # adjusted_close 처리
-        if 'adj close' in df_reset.columns:
-            df_reset.rename(columns={'adj close': 'adjusted_close'}, inplace=True)#?? 왜 adj_close로 안함
-        elif 'adjusted_close' not in df_reset.columns:
-            df_reset['adjusted_close'] = df_reset['close']
-        
-        # 필요한 컬럼만 선택
-        df_save = df_reset[['date', 'open', 'high', 'low', 'close', 'volume', 'adjusted_close']].copy()
-        df_save['ticker_id'] = ticker_id 
-        
-        # 딕셔너리 리스트로 변환
-        records = df_save.to_dict(orient='records') #딕셔너리 리스트가 뭐지.
-        
-        # SQLAlchemy Core로 bulk insert
+        df_reset.columns = df_reset.columns.str.replace(' ','_')
+
+        #select columns
+        df_save = df_reset[['date','open','high','low','close','volume','adj_close']].copy()
+        df_save['ticker_id'] = ticker_id
+
+        #convert to records
+        records = df_save.to_dict(orient='records')
+
+        #make statement
         if update_if_exists:
-            # UPSERT (SQLite 3.24+)
             stmt = sqlite_insert(DailyPrice.__table__).values(records)
             stmt = stmt.on_conflict_do_update(
-                index_elements=['ticker_id', 'date'],
-                set_=dict(#??: 이건 무슨구조지.
-                    open=stmt.excluded.open,#??: excluded는 뭐야
-                    high=stmt.excluded.high,
-                    low=stmt.excluded.low,
-                    close=stmt.excluded.close,
-                    volume=stmt.excluded.volume,
-                    adjusted_close=stmt.excluded.adjusted_close
+                index_elements= ['ticker_id', 'date'],
+                set_=dict(
+                    open = stmt.excluded.open,
+                    high = stmt.excluded.high,
+                    low = stmt.excluded.low,
+                    close = stmt.excluded.close,
+                    volume = stmt.excluded.volume,
+                    adj_close = stmt.excluded.adj_close,
                 )
             )
         else:
-            # INSERT OR IGNORE
             stmt = sqlite_insert(DailyPrice.__table__).values(records)
-            stmt = stmt.on_conflict_do_nothing(index_elements=['ticker_id', 'date'])
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=['ticker_id','date'],
+            )
         
-        result = self.engine.execute(stmt)
-        logger.info(f"✓ Saved {len(records)} price records for {ticker_code}")
-        
+        #excute statement
+        with self.engine.begin() as conn:
+            result = conn.execute(stmt)
+        logger.info(f"Saved {len(records)} price records for {ticker_code}")
+
         return len(records)
     
-    def save_indicators_bulk(
+    def save_indicators(
         self,
         ticker_code: str,
         df: pd.DataFrame,
-        version: str = "v1.0"
-    ) -> int:
+        version: str = "v1.0",
+    ):
         """
         지표 데이터 대량 저장
         
@@ -151,148 +210,157 @@ class DatabaseManager:
         Returns:
             저장된 행 수
         """
-        ticker_id = self.get_or_create_ticker(ticker_code)
-        
-        # DataFrame 전처리
+        #loading ticker_id 
+        ticker_id = self.get_ticker_id(ticker_code)
+
+        #preprocess dataframe
         df_reset = df.reset_index()
-        if 'Date' in df_reset.columns:
-            df_reset.rename(columns={'Date': 'date'}, inplace=True)
         
-        # 필요한 컬럼 선택 (존재하는 것만)
-        indicator_cols = [
-            'date', 'ma_5', 'ma_20', 'ma_60', 'ma_200',
-            'macd', 'macd_signal', 'macd_hist',
-            'rsi_14', 'bb_upper', 'bb_middle', 'bb_lower'
+        df_reset.columns = df_reset.columns.str.strip()
+        df_reset.columns = df_reset.columns.str.lower()
+        df_reset.columns = df_reset.columns.str.replace(' ','_')
+        
+        #select indicators
+        indicators = [
+            'ma_5','ma_20','ma_200','macd',
         ]
-        
-        available_cols = [col for col in indicator_cols if col in df_reset.columns]
-        df_save = df_reset[available_cols].copy()
+        available_indicators = [ind for ind in indicators if ind in df_reset.columns]
+
+        df_save = df_reset[available_indicators + ['date']].copy()
         df_save['ticker_id'] = ticker_id
-        df_save['calculation_version'] = version
-        
-        # NaN을 None으로 변환 (SQL NULL)
-        df_save = df_save.where(pd.notnull(df_save), None)# ??: where의 자세한 문법 파악
-        
-        # 딕셔너리 리스트로 변환
+        df_save['calculated_version'] = version 
+
+        #fill NaN -> None
+        df_save = df_save.replace({np.nan : None})
+
+        #convert to dictionary list
         records = df_save.to_dict(orient='records')
-        
-        # UPSERT
+
+        #make statement
         stmt = sqlite_insert(TechnicalIndicator.__table__).values(records)
         stmt = stmt.on_conflict_do_update(
-            index_elements=['ticker_id', 'date'],
-            set_={col: stmt.excluded[col] for col in available_cols if col != 'date'}
+            index_elements=['ticker_id','date'],
+            set_={
+                ind : stmt.excluded[ind] for ind in available_indicators
+            }
         )
         
-        result = self.engine.execute(stmt)
-        logger.info(f"✓ Saved {len(records)} indicator records for {ticker_code}")
-        
+        #execute stmt
+        with self.engine.begin() as conn:
+            result = conn.execute(stmt)
+        logger.info(f"Saved {len(records)} indicator records for {ticker_code}")
+
         return len(records)
     
-    def load_price_data(
+    def load_ticker_metadata(
         self,
-        ticker_code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> pd.DataFrame:
-        """
-        가격 데이터 조회
-        
-        Returns:
-            DataFrame (index=date)
-        """
-        query = """
-        SELECT 
-            dp.date,
-            dp.open,
-            dp.high,
-            dp.low,
-            dp.close,
-            dp.volume,
-            dp.adjusted_close
-        FROM daily_prices dp
-        JOIN tickers t ON dp.ticker_id = t.ticker_id 
-        WHERE t.ticker_code = :ticker_code
-        """
-        #??:왜 join을 썼는지
-        #??: :ticker_code는 무슨 문법인지.
-        
-        params = {'ticker_code': ticker_code}
-        
-        if start_date:
-            query += " AND dp.date >= :start_date"
-            #??:이게 뭐지
-            params['start_date'] = start_date
-        
-        if end_date:
-            query += " AND dp.date <= :end_date"
-            params['end_date'] = end_date
-        
-        query += " ORDER BY dp.date"
-        
-        df = pd.read_sql(query, self.engine, params=params, parse_dates=['date'])
-        #??: engine들어가는거면 pandas가 SQLAlchemy와 연동된건가? 근데 기본함수가 어떻게?
-        df.set_index('date', inplace=True)
-        
+        ticker_codes: Optional[List[str]] = None,
+    ):
+        stmt = select(
+            Ticker.ticker_code,
+            Ticker.name,
+            Ticker.market,
+            Ticker.sector,
+        )
+        if ticker_codes:
+            stmt = stmt.where(Ticker.ticker_code.in_(ticker_codes))
+
+        df = pd.read_sql(stmt, self.engine)
+
+        if not df.empty:
+            df.set_index('ticker_code', inplace=True) # 티커를 인덱스로
+
         return df
-    
-    def load_data_with_indicators(
-        self,
-        ticker_code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> pd.DataFrame:
-        """
-        가격 + 지표 데이터 조회
+
+    def load_price_data(
+            self,
+            ticker_code: str,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+    ):
+        stmt = select(
+            DailyPrice.date,
+            DailyPrice.open,
+            DailyPrice.high,
+            DailyPrice.low,
+            DailyPrice.close,
+            DailyPrice.volume,
+            DailyPrice.adj_close,
+        ).join(
+            Ticker, Ticker.ticker_id == DailyPrice.ticker_id   
+        ).where(
+            Ticker.ticker_code == ticker_code
+        )
+
+        if start_date:
+            stmt = stmt.where(DailyPrice.date >= start_date)
+
+        if end_date:
+            stmt = stmt.where(DailyPrice.date <= end_date)
+
+        stmt = stmt.order_by(DailyPrice.date)
         
-        Returns:
-            DataFrame (index=date)
-        """
-        query = """
-        SELECT 
-            dp.date,
-            dp.close,
-            dp.volume,
-            ti.ma_5,
-            ti.ma_20,
-            ti.ma_60,
-            ti.ma_200,
-            ti.macd,
-            ti.macd_signal,
-            ti.macd_hist,
-            ti.rsi_14
-        FROM daily_prices dp
-        JOIN tickers t ON dp.ticker_id = t.ticker_id
-        LEFT JOIN technical_indicators ti 
-            ON dp.ticker_id = ti.ticker_id 
-            AND dp.date = ti.date
-        WHERE t.ticker_code = :ticker_code
-        """
-        
-        params = {'ticker_code': ticker_code}
+        df = pd.read_sql(stmt,self.engine,parse_dates=['date'])
+        if not df.empty:
+            df.set_index('date',inplace=True)
+
+        return df
+
+    def load_indicators(
+            self,
+            ticker_code: str,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+    ):
+        #Make Query
+        stmt = select(
+            TechnicalIndicator.date,
+            TechnicalIndicator.ma_5,
+            TechnicalIndicator.ma_20,
+            TechnicalIndicator.ma_200,
+            TechnicalIndicator.macd,
+        ).join(
+            Ticker, Ticker.ticker_id == TechnicalIndicator.ticker_id
+        ).where(
+            Ticker.ticker_code == ticker_code
+        )
         
         if start_date:
-            query += " AND dp.date >= :start_date"
-            params['start_date'] = start_date
-        
+            stmt = stmt.where(TechnicalIndicator.date >= start_date)
+
         if end_date:
-            query += " AND dp.date <= :end_date"
-            params['end_date'] = end_date
+            stmt = stmt.where(TechnicalIndicator.date <= end_date)
         
-        query += " ORDER BY dp.date"
-        
-        df = pd.read_sql(query, self.engine, params=params, parse_dates=['date'])
-        df.set_index('date', inplace=True)
-        
+        stmt = stmt.order_by(TechnicalIndicator.date)
+
+        df = pd.read_sql(stmt, self.engine, parse_dates=['date'])
+        if not df.empty:
+            df.set_index('date',inplace=True)
+
         return df
     
     def close(self):
-        """연결 종료"""
         self.session.close()
-        self.engine.dispose()#단어뜻
+        self.engine.dispose()
         logger.info("Database connection closed")
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+if __name__ == '__main__':
+    fetcher = StockDataFetcher()
+
+    korean_stocks = [
+        "005930.KS",  # 삼성전자
+        "000660.KS",  # SK하이닉스
+        "035720.KS",  # 카카오
+        "035420.KS",  # NAVER
+    ]    
+
+    data_dict = fetcher.fetch_multiple_stocks(korean_stocks)
+    with DatabaseManager() as db_manager:
+        for ticker, df in data_dict.items():
+            db_manager.save_price_data(ticker_code=ticker, stock_df=df, update_if_exists=True)
