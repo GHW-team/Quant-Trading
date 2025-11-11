@@ -1,0 +1,119 @@
+지금 ML퀀트 트레이딩 시스템에서 데이터 파이프라인을 구성 중인데 고민이 있어.
+
+현재 데이터 파이프라인의 구성은
+    1.yfinance에서 OHLCV 데이터 패치
+    2.OHLCV정보 DB에 저장
+    3.OHLCV정보 불러와서 지표 계산
+    4.계산한 지표를 DB에 저장 
+근데 단계를 통합해서 두개의 단계로 만드려고
+    1.ohlcv fetch 이후 db 저장
+    2.db에서 가격 불러와서 지표 계산 이후 저장.
+
+이렇게 되어있어. 지금 생각하는 데이터 파이프라인 인터페이스는
+
+1.부분적 사용
+    1.OHLCV 불러오기 및 db 저장 
+        -용도
+            (1)코드에서 ohlcv 데이터 필요할때 df 불러오는 용도
+            (2)원하는 종목들의 ohlcv데이터를 db에 저장해놓는 용도
+            (3)서버에서 매일 특정시간에 실행시켜 최신 가격 데이터 갱신하는 용도 
+        -사용방법
+            (1)python 파일에서 datapipeline 클래스 불러와서 사용
+            (2)커맨드 라인 사용 
+                ex) python datapipeline.py 1 (ohlcv fetch 이후 db 저장만 작동)
+        -입력값
+            -ticker_list
+            -(start_date,end_date) or (period)  #둘 중 택 1
+            -interval도
+            -auto_adjust
+            -actions
+            -db_path
+            -update_if_exists 
+        -출력/반환값
+            -pd.DataFrame (OHLCV 데이터)
+        -고민중인 사항
+            (1)OHLCV데이터를 요청 받았을때, DB에 존재하는 데이터일 경우에 어떻게 할지(update_if_exists변)
+                1.따로 yfinance에서 fetch를 해오지 않고, db에있는 데이터를 불러와서 반환
+                2.db에 존재하던말던 새로 yfinance에서 fetch해와서, db에 저장 후 가격데이터 반환
+            (2)만약 위에서 1번 사안을 골랐을때, 데이터가 중간 중간이 비어있는경우에는 어떻게 처리할지
+                1.한칸이라도 비어있으면 yfinance로 전체 범위 다시 불러와서, db에 저장
+                2.비어있는 부분만 yfinance로 불러와서, db에 저장
+            (3)(2)사항에서, 데이터가 비어있는지 아닌지를 어떻게 판단할건지.
+                1.주식 데이터는 주말을 제외한 날짜기 때문에 애초에 주말은 중간이 비어있음. 
+                    혹은 모종의 이유로 장이 중지되었던 날짜가 존재할수도 있음.
+                    그렇다면 날짜 순서대로 비어있는 부분 골라내기가 어려움.
+    2.지표데이터 받아오기
+        -용도
+            (1)코드에서 지표 데이터 필요할때 df 불러오는 용도
+            (2)원하는 종목들의 지표데이터를 db에 저장해놓는 용           
+        -사용방법
+            (1)python 파일에서 datapipeline 클래스 불러와서 사용
+            (2)커맨드 라인 사용 
+                ex) python datapipeline.py 2 (db에서 ohlcv불러와서 지표 계산 및 저장만 하기)
+        -입력값
+            -ticker_list
+            -indicator_list
+            -calculate_if_exist
+            -how_NaN (결측치 처리 방법 결정)
+        -출력값
+            -pd.DataFrame(지표데이터)
+        -고민 중인 사항
+            (1)지표 데이터를 요청 받았을때, DB에 존재하는 데이터일 경우에 어떻게 할지(calculate_if_exist)
+                1.따로 db에서 불러와서 계산하지 않고, db에있는 지표데이터를 불러와서 반환
+                2.db에 존재하던말던 새로 db에서 ohlcv가져와서, 지표 계산 및 db에 저장 후 지표데이터 반환
+            (2)만약 위에서 1번 사안을 골랐을때, 데이터가 중간 중간이 비어있는경우에는 어떻게 처리할지
+                1.한칸이라도 비어있으면 db에서 전체범위 ohlcv불러와서 지표 계산 후, db에 저장
+                2.비어있는 부분만 ohlcv로 불러와서 지표 계산후 db저장
+            (3)만약 50일 ~ 100일(가상의 날짜 범위)의 ohlcv데이터를 불러와서 지표 데이터를 계산한다면,
+                    ma_20의 경우 약 20개의 결측치가 존재하게 됨. 
+                    이 값들을 계산하기 위해서는 30~50일까지의 ohlcv데이터가 따로 필요함.
+                    그러나 결측치를 채우기 위해 필요한 날짜범위의 ohlcv데이터를 불러와서 결측치의 지표계산을 수행하는건
+                    가능하기는 함.(데이터 상으로 역사에 존재하기는 하기 때문)
+                    이 경우에 
+                    (1)이 결측치들을 매꾸기위해 과거의 데이터들을 추가로 불러와 지표를 계산하여 결측치를 채우는 것이 맞는지
+                    (2)결측치들을 그대로 냅두고 모델 학습 이전 데이터 전처리 과정에서 적절한 값을 생각해서 채워넣는것이 맞는지.
+
+2.데이터 파이프라인 전체 작동
+    1.여러 종목의 OHLCV데이터 불러오기 + 불러온 데이터로 지표계산해서 DB에 저장하기
+        -용도
+            (1)서버에서 매일 특정 시간에 실행시켜 최신 가격 데이터 갱신 + 모델학습에 필요한 최신 지표데이터 갱신
+            (2)코드에서 OHLCV+지표데이터로 구성된 DataFrame이 필요할때
+        -사용방법
+            (1)python 파일에서 datapipeline 클래스 불러와서 사용
+            (2)커맨드 라인 사용 
+                ex) python datapipeline.py 3 (데이터 파이프라인 전 과정 처음부터 마지막까지 실행)
+        -입력값
+            -ticker_list
+            -indicator_list
+            -(start_date,end_date) or (period)  #둘 중 택 1
+            -update_if_exists 
+            -calculate_if_exist
+            -how_NaN (결측치 처리 방법 결정)
+            -interval
+            -auto_adjust
+            -actions
+            -db_path
+        -출력값
+            -DataFrame(OHLCV + 지표데이터)
+        -고민중인 사항
+            (1)입력해야 하는 입력값들이 많아서 어떻게 설정을 관리할지 고민
+                -추측컨데 아마 자주 변경해야하는 입력값은
+                    -ticker_list
+                    -indicator_list
+                    -(start_date,end_date) or (period)  #둘 중 택 1
+                -가끔 변경 or 거의 변경하지않는 입력값(추정)
+                    -update_if_exists 
+                    -calculate_if_exist
+                    -how_NaN (결측치 처리 방법 결정)
+                    -interval
+                    -auto_adjust
+                    -actions
+                    -db_path
+                1.환경변수
+                2.config파일
+                3.기타 다른 방법
+                4.여러가지 방법 혼합.
+                =>어떤 식으로 관리할까. 
+
+
+

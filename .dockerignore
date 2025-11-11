@@ -36,4 +36,4 @@ venv/
 .DS_Store
 
 #클로드 개인설정
-.claude/
+.claude/a

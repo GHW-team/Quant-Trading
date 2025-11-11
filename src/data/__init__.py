@@ -1,7 +1,6 @@
 # src/data/__init__.py - 데이터 모듈 export
 
 from .models import Base, Ticker, DailyPrice, TechnicalIndicator, create_tables
-from .init_database import init_database
 from .db_manager import DatabaseManager
 from .data_fetcher import StockDataFetcher
 from .indicator_calculator import IndicatorCalculator
@@ -16,7 +15,6 @@ __all__ = [
     'TechnicalIndicator',
     'create_tables',
     # Database
-    'init_database',
     'DatabaseManager',
     # Data Fetching
     'StockDataFetcher',

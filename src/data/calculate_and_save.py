@@ -1,38 +1,27 @@
-# src/data/calculate_and_save.py - 지표 계산 및 DB 저장 파이프라인
-
-import pandas as pd
+#class IndicatorPipeline 
+#지표 계산 및 저장 파이프라인
 import logging
-from typing import List, Optional
-from pathlib import Path
-
-from .indicator_calculator import IndicatorCalculator
-from .db_manager import DatabaseManager
+from src.data.db_manager import DatabaseManager
+from src.data.indicator_calculator import IndicatorCalculator
+from typing import List,Optional,Dict
 
 logger = logging.getLogger(__name__)
 
-
 class IndicatorPipeline:
     """지표 계산 및 저장 파이프라인"""
-
-    def __init__(self, db_path: str = "data/database/stocks.db"):
-        """
-        초기화
-
-        Args:
-            db_path: 데이터베이스 경로
-        """
-        self.db_manager = DatabaseManager(db_path)
-        self.calculator = IndicatorCalculator()
+    def __init__(self,db_path: str = "data/database/stocks.db"):
         self.db_path = db_path
+        self.db_manager = DatabaseManager(db_path=db_path)
+        self.calculator = IndicatorCalculator()
 
-    def process_indicators(
+    def process_single_ticker(
         self,
-        ticker_code: str,
-        indicators: Optional[List[str]] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        version: str = "v1.0"
-    ) -> int:
+        ticker: str,
+        start_date: Optional[str],
+        end_date: Optional[str],
+        indicator_list: Optional[List[str]],
+        version: Optional[str]='v1.0'
+    ):
         """
         특정 종목의 지표 계산 및 DB 저장
 
@@ -47,54 +36,52 @@ class IndicatorPipeline:
         Returns:
             저장된 레코드 수
         """
-        logger.info(f"Starting indicator pipeline for {ticker_code}")
-        logger.info(f"Indicators to calculate: {indicators or 'all'}")
-
+        logger.info(f"Starting indicator pipeline for {ticker}")
+        logger.info(f"Indicators to calculate: {indicator_list or 'all'}")
         try:
-            # 1. Daily prices 로드
-            logger.info(f"Loading daily prices for {ticker_code}")
-            price_df = self.db_manager.load_price_data(
-                ticker_code=ticker_code,
+            #load data from db
+            logger.info(f"Loading daily prices for {ticker}")
+            df = self.db_manager.load_price_data(
+                ticker_code=ticker,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+            ) 
+            
+            if df.empty:
+                logger.warning(f"No price data about {ticker}")
+                raise ValueError(f"No price data found for {ticker}")
+            
+            logger.info(f"Loaded {len(df)} records for {ticker}")
+                
+            #calculate indicator from data
+            logger.info(f"Calculating indicators for {ticker}")
+            calculated_df = self.calculator.calculate_indicators(
+                df=df,
+                indicator_list=indicator_list,
             )
-
-            if price_df.empty:
-                logger.warning(f"No price data found for {ticker_code}")
-                return 0
-
-            logger.info(f"Loaded {len(price_df)} records for {ticker_code}")
-
-            # 2. 지표 계산
-            logger.info(f"Calculating indicators for {ticker_code}")
-            indicators_df = self.calculator.calculate_indicators(
-                df=price_df,
-                indicators=indicators
+            
+            #save indicator to db 
+            logger.info(f"Saving indicators to database for {ticker}")
+            saved_count = self.db_manager.save_indicators(
+                ticker_code=ticker,
+                df = calculated_df,
+                version= version,
             )
-
-            # 3. DB 저장
-            logger.info(f"Saving indicators to database for {ticker_code}")
-            saved_count = self.db_manager.save_indicators_bulk(
-                ticker_code=ticker_code,
-                df=indicators_df,
-                version=version
-            )
-
-            logger.info(f"✓ Successfully processed {ticker_code}: {saved_count} records saved")
+            logger.info(f"{ticker}: Saved indicator {saved_count} records")
             return saved_count
 
-        except Exception as e:
-            logger.error(f"Error processing {ticker_code}: {str(e)}")
+        except Exception as e: 
+            logger.error(f"Error processing {ticker}: {e}")
             raise
 
     def process_multiple_tickers(
         self,
-        ticker_codes: List[str],
-        indicators: Optional[List[str]] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        version: str = "v1.0"
-    ) -> dict:
+        ticker_list: List[str],
+        start_date: Optional[str],
+        end_date: Optional[str],
+        indicator_list: Optional[List[str]],
+        version: Optional[str]= 'v1.0'
+    )-> Dict[str,dict]:
         """
         여러 종목의 지표 계산 및 DB 저장
 
@@ -108,38 +95,38 @@ class IndicatorPipeline:
         Returns:
             종목별 저장 결과 딕셔너리
         """
+
         results = {}
         failed = []
+        logger.info(f"Processing {len(ticker_list)} tickers")
 
-        logger.info(f"Processing {len(ticker_codes)} tickers")
-
-        for ticker_code in ticker_codes:
+        for ticker in ticker_list:
             try:
-                saved_count = self.process_indicators(
-                    ticker_code=ticker_code,
-                    indicators=indicators,
-                    start_date=start_date,
+                saved_count = self.process_single_ticker(
+                    ticker = ticker,
+                    start_date= start_date,
                     end_date=end_date,
-                    version=version
-                )
-                results[ticker_code] = {
-                    'status': 'success',
-                    'saved_count': saved_count
+                    indicator_list=indicator_list,
+                    version=version,
+                    )
+                results[ticker] = {
+                    'status' : 'success',
+                    'saved_count' : saved_count
                 }
             except Exception as e:
-                logger.error(f"Failed to process {ticker_code}: {str(e)}")
-                results[ticker_code] = {
-                    'status': 'failed',
-                    'error': str(e)
+                logger.error(f'Failed to process {ticker} : {e}')
+                results[ticker] = {
+                    'status' : 'failed',
+                    'error' : str(e)
                 }
-                failed.append(ticker_code)
-
-        logger.info(f"✓ Processing complete: {len(ticker_codes) - len(failed)}/{len(ticker_codes)} succeeded")
+                failed.append(ticker)
+        
+        logger.info(f"Processing complete : {len(ticker_list)-len(failed)}/{len(ticker_list)} successed")
         if failed:
-            logger.warning(f"Failed tickers: {failed}")
-
+            logger.warning(f"failed tickers: {failed}")
+        
         return results
-
+    
     def get_available_indicators(self) -> List[str]:
         """
         사용 가능한 지표 목록
@@ -148,79 +135,84 @@ class IndicatorPipeline:
             지표 목록
         """
         return self.calculator.get_available_indicators()
-
+    
     def close(self):
         """DB 연결 종료"""
         self.db_manager.close()
 
+#=========================================================
+#================= 커맨드라인 사용을 위한 함수 ==================
+#=========================================================
 
-# ============== 커맨드라인 사용을 위한 함수 ==============
 
+#??: 만약 데이터베이스에 날짜 중간중간 데이터가 비어있는경우, 이 파이프라인을 end,start date None으로 작동시킬경우 어떻게 되는지
+#--> 결국 ta 함수가 어떤식으로 작동하느냐에 달림
 def calculate_and_save(
-    ticker_code: str,
-    indicators: Optional[List[str]] = None,
-    db_path: str = "data/database/stocks.db"
+    ticker: str,
+    indicator_list: List[str],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db_path: Optional[str] = "data/database/stocks.db",
+    version: Optional[str] = 'v1.0',
 ) -> int:
     """
     단일 종목 지표 계산 및 저장 (간단한 인터페이스)
 
     Args:
-        ticker_code: 종목 코드
-        indicators: 계산할 지표 목록
+        ticker: 종목 코드
+        indicator_list: 계산할 지표 목록
+        start_date: 지표 계산 시작 날짜
+        end_date: 지표 계산 종료 날짜
         db_path: 데이터베이스 경로
+        version: 지표 계산 알고리즘 버전
 
     Returns:
         저장된 레코드 수
     """
-    pipeline = IndicatorPipeline(db_path)
+    pipeline = IndicatorPipeline(db_path=db_path)
     try:
-        return pipeline.process_indicators(
-            ticker_code=ticker_code,
-            indicators=indicators
+        return pipeline.process_single_ticker(
+            ticker=ticker,
+            indicator_list=indicator_list,
+            version=version,
+            start_date=start_date,
+            end_date=end_date,
         )
     finally:
         pipeline.close()
 
-
 def calculate_batch(
-    ticker_codes: List[str],
-    indicators: Optional[List[str]] = None,
-    db_path: str = "data/database/stocks.db"
-) -> dict:
+    ticker_list: List[str],
+    indicator_list: List[str],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db_path: Optional[str] = 'data/database/stocks.db',
+    version: Optional[str] = 'v1.0',
+):
     """
     여러 종목 지표 계산 및 저장 (배치 처리)
 
     Args:
-        ticker_codes: 종목 코드 리스트
-        indicators: 계산할 지표 목록
+        ticker_list: 종목 코드 리스트
+        indicator_list: 계산할 지표 목록
+        start_date: 지표 계산 시작 날짜
+        end_date: 지표 계산 종료 날짜
         db_path: 데이터베이스 경로
+        version: 지표 계산 알고리즘 버전
 
     Returns:
         처리 결과
     """
-    pipeline = IndicatorPipeline(db_path)
+    pipeline = IndicatorPipeline(db_path=db_path)
     try:
         return pipeline.process_multiple_tickers(
-            ticker_codes=ticker_codes,
-            indicators=indicators
+            ticker_list=ticker_list,
+            indicator_list=indicator_list,
+            version=version,
+            start_date=start_date,
+            end_date=end_date,
         )
     finally:
         pipeline.close()
-
-
-if __name__ == "__main__":
-    # 로깅 설정
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
-    # 예시: 단일 종목 처리
-    # result = calculate_and_save('005930', indicators=['ma_5', 'ma_20', 'ma_200', 'macd'])
-    # print(f"Saved {result} records")
-
-    # 예시: 여러 종목 처리
-    # results = calculate_batch(['005930', '000660'], indicators=['ma_5', 'ma_20', 'macd'])
-    # print(results)
-
-    print("Use calculate_and_save() or calculate_batch() function")
+    
+        

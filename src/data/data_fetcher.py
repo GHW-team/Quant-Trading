@@ -1,12 +1,11 @@
-# src/data/data_fetcher.py
-
-import time
-import logging
-from typing import Dict, List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import yfinance as yf
+#StockDataFetcher
 import pandas as pd
+import yfinance as yf
+import logging
+from typing import Optional,List,Dict
 from requests.exceptions import RequestException
+from concurrent.futures import ThreadPoolExecutor,as_completed
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,8 +19,7 @@ logger = logging.getLogger(__name__)
 
 class StockDataFetcher:
     """yfinance를 사용한 주식 데이터 수집기"""
-    
-    def __init__(self, max_workers: int = 5, max_retries: int = 3):
+    def __init__(self,max_workers: int=5,max_retries: int=3):
         """
         Args:
             max_workers: 동시 실행 스레드 수 (Yahoo API 부담 고려)
@@ -29,13 +27,15 @@ class StockDataFetcher:
         """
         self.max_workers = max_workers
         self.max_retries = max_retries
-    
+        
     def fetch_single_stock(
-        self, 
-        ticker: str, 
-        period: str = "1y",
-        interval: str = "1d"
-    ) -> Optional[pd.DataFrame]:
+            self, 
+            ticker: str, 
+            period: str = "1y", 
+            interval: str = "1d",
+            auto_adjust : bool = False,
+            actions : bool = False
+        ) -> Optional[pd.DataFrame]:
         """
         단일 종목 데이터 수집 (재시도 포함)
         
@@ -47,49 +47,49 @@ class StockDataFetcher:
         Returns:
             DataFrame 또는 None (실패 시)
         """
-        for attempt in range(1, self.max_retries + 1):
+        for attempt in range(1,self.max_retries+1):
             try:
                 stock = yf.Ticker(ticker)
                 df = stock.history(
-                    period=period, 
-                    interval=interval,
-                    auto_adjust=False, # 분할/배당 자동 조정
-                    actions = False
+                    period = period,
+                    interval = interval,
+                    auto_adjust = auto_adjust,
+                    actions = actions
                 )
-                
-                # 데이터 검증
+                #data validation
                 if df.empty:
-                    logger.warning(f"⚠ {ticker}: Empty data returned")
+                    logger.warning(f"{ticker}: Empty data returns")
                     return None
-                
+
                 if len(df) < 10:
-                    logger.warning(f"⚠ {ticker}: Insufficient data ({len(df)} rows)")
-                    return None
-                
-                logger.info(f"✓ {ticker}: {len(df)} records fetched")
+                    logger.warning(f"{ticker}: Insufficient data ({len(df)} rows)")
+
+                logger.info(f"{ticker}: {len(df)} records fetched")
                 return df
-                
+
             except RequestException as e:
                 logger.warning(
-                    f"⚠ {ticker}: Network error (attempt {attempt}/{self.max_retries}): {e}"
+                    f"{ticker}: Network error (attempt {attempt}/{self.max_retries}): {e}"
                 )
                 if attempt < self.max_retries:
-                    sleep_time = 2 ** attempt  # Exponential backoff: 2, 4, 8초
+                    sleep_time = 2**attempt
                     time.sleep(sleep_time)
-                    
+
             except Exception as e:
-                logger.error(f"✗ {ticker}: Unexpected error: {e}")
+                logger.error(f"{ticker}: Unexpected error: {e}")
                 return None
-        
-        logger.error(f"✗ {ticker}: Failed after {self.max_retries} attempts")
+
+        logger.error(f"{ticker}: Failed after {self.max_retries} attempts")
         return None
-    
+
     def fetch_multiple_stocks(
-        self,
-        ticker_list: List[str],
-        period: str = "1y",
-        interval: str = "1d"
-    ) -> Dict[str, pd.DataFrame]:
+            self,
+            ticker_list: List[str],
+            period: str = "1y",
+            interval: str = "1d",
+            auto_adjust: bool = False,
+            actions: bool = False,
+        )-> Dict[str,pd.DataFrame]:
         """
         여러 종목 병렬 수집
         
@@ -102,19 +102,26 @@ class StockDataFetcher:
             {ticker: DataFrame} 딕셔너리
         """
         results = {}
-        
+
+        if not ticker_list:
+            logger.warning("Ticker list is empty")
+            return results
+
         logger.info(f"🚀 Fetching {len(ticker_list)} stocks with {self.max_workers} workers")
-        
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 모든 종목에 대한 Future 생성
             future_to_ticker = {
                 executor.submit(
-                    self.fetch_single_stock, ticker, period, interval
-                ): ticker
+                    self.fetch_single_stock, 
+                    ticker, 
+                    period, 
+                    interval,
+                    auto_adjust,
+                    actions,
+                ): ticker 
                 for ticker in ticker_list
             }
-            
-            # 완료된 순서대로 처리
+
             for future in as_completed(future_to_ticker):
                 ticker = future_to_ticker[future]
                 try:
@@ -122,22 +129,73 @@ class StockDataFetcher:
                     if df is not None:
                         results[ticker] = df
                 except Exception as e:
-                    logger.error(f"✗ {ticker}: Exception in thread: {e}")
-        
-        success_rate = len(results) / len(ticker_list) * 100
+                    logger.error(f"{ticker}: Exception in thread: {e}")
+
+        success_rate = len(results) / len(ticker_list) * 100 if ticker_list else 0
         logger.info(
-            f"📊 Collection complete: {len(results)}/{len(ticker_list)} "
-            f"({success_rate:.1f}% success)"
+            f"Collection complete: {len(results)}/{len(ticker_list)}"
+            f"({success_rate}% success)"
         )
-        
+
         return results
+
+    def _fetch_with_dates(
+            self,
+            ticker: str,
+            start_date: str,
+            end_date: str,
+            interval: str = "1d",
+            auto_adjust : bool = False,
+            actions : bool = False,)-> Optional[pd.DataFrame]:
+        """날짜 범위 지정 헬퍼 메서드"""
+
+        for attempt in range(1,self.max_retries+1):
+            try:
+                stock = yf.Ticker(ticker=ticker)
+                df = stock.history(
+                    start = start_date,
+                    end = end_date,
+                    interval = interval,
+                    auto_adjust = auto_adjust,
+                    actions = actions
+                )
+
+                #data validation
+                if df.empty:
+                    logger.warning(f"{ticker}: Empty data returned")
+                    return None
+
+                if len(df) < 10:
+                    logger.warning(f"{ticker}: Insufficient data {len(df)} rows")
+                    return None
+                
+                logger.info(f"{ticker}: {len(df)} records fetched")
+                return df
+
+            except RequestException as e:
+                logger.warning(
+                    f"{ticker}: Network error (attempt {attempt}/{self.max_retries}): {e}"
+                )
+                if attempt < self.max_retries:
+                    sleep_time = 2**attempt
+                    time.sleep(sleep_time)
+
+            except Exception as e:
+                logger.error(f"{ticker}: Unexpected error: {e}")
+                return None
+        
+        logger.info(f"{ticker}: Failed after {self.max_retries} attempts")
+        return None
     
     def fetch_with_date_range(
-        self,
-        ticker_list: List[str],
-        start_date: str,
-        end_date: str
-    ) -> Dict[str, pd.DataFrame]:
+        self, 
+        ticker_list: List[str], 
+        start_date: str, 
+        end_date: str,
+        interval: str = "1d",
+        auto_adjust: bool = False,
+        actions: bool = False,
+        ) -> Dict[str,pd.DataFrame]:
         """
         특정 날짜 범위로 수집 (백테스팅용)
         
@@ -146,60 +204,50 @@ class StockDataFetcher:
             start_date: 시작일 "YYYY-MM-DD"
             end_date: 종료일 "YYYY-MM-DD"
         """
+
         results = {}
-        
+        if not ticker_list:
+            logger.warning("Ticker list is empty")
+            return results
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_ticker = {
                 executor.submit(
-                    self._fetch_with_dates, ticker, start_date, end_date
+                    self._fetch_with_dates, 
+                    ticker, 
+                    start_date, 
+                    end_date,
+                    interval,
+                    auto_adjust, 
+                    actions,
                 ): ticker
                 for ticker in ticker_list
             }
-            
+
             for future in as_completed(future_to_ticker):
                 ticker = future_to_ticker[future]
                 df = future.result()
                 if df is not None:
                     results[ticker] = df
-        
+            
+        success_rate = len(results)/len(ticker_list) * 100 if ticker_list else 0
+        logger.info(f"Fetch Complete: {len(results)}/{len(ticker_list)}")
+        logger.info(f"({success_rate}%) Success")
         return results
-    
-    def _fetch_with_dates(self, ticker, start, end):
-        """날짜 범위 지정 헬퍼 메서드"""
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                stock = yf.Ticker(ticker)
-                df = stock.history(start=start, 
-                                    end=end, 
-                                    auto_adjust=True,
-                                    actions = False
-                                    )
-                
-                if not df.empty:
-                    logger.info(f"✓ {ticker}: {len(df)} records")
-                    return df
-                    
-            except Exception as e:
-                logger.warning(f"⚠ {ticker}: Attempt {attempt} failed: {e}")
-                if attempt < self.max_retries:
-                    time.sleep(2 ** attempt)
-        
-        return None
 
 
-# 사용 예시
-if __name__ == "__main__":
-    fetcher = StockDataFetcher(max_workers=5, max_retries=3)
-    
-    korean_stocks = [
-        "005930.KS",  # 삼성전자
-        "000660.KS",  # SK하이닉스
-        "035720.KS",  # 카카오
-        "035420.KS",  # NAVER
-    ]
-    
-    data_dict = fetcher.fetch_multiple_stocks(korean_stocks, period="2y")
-    
-    for ticker, df in data_dict.items():
-        print(f"\n{ticker}:")
-        print(df.head())
+if __name__ == '__main__':
+    fetcher = StockDataFetcher()
+
+    exp = '035420.KS'
+
+    #df = fetcher.get_single_stock(exp)
+    df = fetcher._fetch_with_dates(ticker=exp, start_date = "2025-09-01", end_date = "2025-10-01")
+    print(df.head())
+
+    tickers = ["005930.KS", "000660.KS", "035720.KS", "035420.KS"]
+    #df_dict = fetcher.fetch_multiple_stocks(tickers=tickers)
+    df_dict = fetcher.fetch_with_date_range(ticker_list=tickers, start_date = "2025-09-01", end_date = "2025-10-01")
+    for ticker in tickers:
+        print(f"\nticker : {ticker}")
+        print(df_dict[ticker].head(5))
