@@ -17,7 +17,6 @@ END = FETCH_CFG["end"]
 AUTO_ADJUST = FETCH_CFG.get("auto_adjust", True)
 
 FEATURE_CFG = cfg.get("features", {})
-FEATURE_VERSION = FEATURE_CFG.get("version", "v1")
 MA_WINDOWS = FEATURE_CFG.get("ma_windows", [5, 20, 200])
 # python -m scripts.fetch_price
 
@@ -58,16 +57,6 @@ def run_for_ticker(ticker):
     # MA 5, 20, 200
     feat_df = add_ma(feat_df, windows=(5, 20, 200))
 
-    # 수익률: 1일, 5일
-    feat_df["ret_1d"] = feat_df["close"].pct_change(1)
-    feat_df["ret_5d"] = feat_df["close"].pct_change(5)
-
-    # 갭: 어제 종가 대비 오늘 시가
-    # gap_o_c = (오늘 시가 - 어제 종가) / 어제 종가
-    feat_df["gap_o_c"] = (
-        (feat_df["open"] - feat_df["close"].shift(1)) / feat_df["close"].shift(1)
-    )
-
     # 7) features_daily용 rows 만들기
     rows_feat = []
     for r in feat_df.itertuples(index=False):
@@ -78,10 +67,6 @@ def run_for_ticker(ticker):
                 getattr(r, "ma_5", None),
                 getattr(r, "ma_20", None),
                 getattr(r, "ma_200", None),
-                r.ret_1d,
-                r.ret_5d,
-                r.gap_o_c,
-                FEATURE_VERSION,
             )
         )
 

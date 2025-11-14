@@ -29,22 +29,7 @@ CREATE TABLE IF NOT EXISTS features_daily (
   ma_5     REAL,
   ma_20    REAL,
   ma_200   REAL,
-  ret_1d   REAL,
-  ret_5d   REAL,
-  gap_o_c  REAL,
-  version  TEXT DEFAULT 'v1',
-  PRIMARY KEY (ticker, date, version),
-  FOREIGN KEY (ticker) REFERENCES securities(ticker)
-);
-
-CREATE TABLE IF NOT EXISTS labels_daily (
-  ticker    TEXT NOT NULL,
-  date      TEXT NOT NULL,
-  label     INTEGER NOT NULL,        -- 0/1
-  rule      TEXT NOT NULL,           -- 예: 'ret_20d>0.05'
-  horizon   INTEGER NOT NULL,        -- 예: 20
-  version   TEXT DEFAULT 'v1',
-  PRIMARY KEY (ticker, date, rule, horizon, version),
+  PRIMARY KEY (ticker, date),
   FOREIGN KEY (ticker) REFERENCES securities(ticker)
 );
 
