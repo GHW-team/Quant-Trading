@@ -11,7 +11,7 @@ cfg = get_config()
 DB_PATH = get_db_path()
 
 FETCH_CFG = cfg["fetch"]
-TICKERS = FETCH_CFG["tickers"]          # ["005930.KS", "000660.KS", ...]
+TICKERS = FETCH_CFG["tickers"]
 START = FETCH_CFG["start"]
 END = FETCH_CFG["end"]
 AUTO_ADJUST = FETCH_CFG.get("auto_adjust", True)
