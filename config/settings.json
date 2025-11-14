@@ -1,0 +1,18 @@
+{
+  "database": {
+    "path": "data/market.db"
+  },
+  "fetch": {
+    "tickers": [
+      "005930.KS",
+      "000660.KS"
+    ],
+    "start": "2025-10-01",
+    "end": "2025-10-30",
+    "auto_adjust": true
+  },
+  "features": {
+    "version": "v1",
+    "ma_windows": [5, 20, 200]
+  }
+}

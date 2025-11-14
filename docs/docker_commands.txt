@@ -1,0 +1,138 @@
+# Docker & Docker Compose 필수 명령어
+
+==================================================================
+1. 📦 이미지 관리
+==================================================================
+
+docker images                                # 로컬 이미지 목록 확인
+docker images -a                             # 중간 레이어 포함 모든 이미지 표시
+docker pull <image>:<tag>                    # Docker Hub에서 이미지 다운로드
+docker build -t <name>:<tag> .               # Dockerfile로 이미지 빌드
+docker build --no-cache -t <name>:<tag> .    # 캐시 없이 완전히 새로 빌드
+docker rmi <image-id>                        # 이미지 삭제
+docker rmi $(docker images -q)               # 모든 이미지 삭제
+docker image prune                           # 사용하지 않는 이미지 정리
+docker image prune -a                        # 사용하지 않는 모든 이미지 삭제
+
+==================================================================
+2. 🎮 컨테이너 실행 및 제어
+==================================================================
+
+docker run <image>                           # 컨테이너 실행
+docker run -d <image>                        # 백그라운드에서 실행 (detached)
+docker run -it <image> bash                  # 인터랙티브 터미널로 실행
+docker run --rm <image>                      # 종료 시 자동 삭제
+docker start <container-id>                  # 중지된 컨테이너 시작
+docker stop <container-id>                   # 컨테이너 중지
+docker restart <container-id>                # 컨테이너 재시작
+docker kill <container-id>                   # 컨테이너 강제 종료
+docker rm <container-id>                     # 컨테이너 삭제
+docker rm -f <container-id>                  # 실행 중인 컨테이너 강제 삭제
+docker rm $(docker ps -aq)                   # 모든 컨테이너 삭제
+
+==================================================================
+3. 🔍 상태 확인 및 모니터링
+==================================================================
+
+docker ps                                    # 실행 중인 컨테이너 목록
+docker ps -a                                 # 모든 컨테이너 목록 (중지된 것 포함)
+docker stats                                 # 실시간 리소스 사용량 모니터링
+docker system df                             # Docker 디스크 사용량
+
+==================================================================
+4. 🔧 컨테이너 내부 접근
+==================================================================
+
+docker exec -it <container-id> bash          # 실행 중인 컨테이너 쉘 접속
+docker exec -it <container-id> sh            # sh 쉘로 접속 (bash 없는 경우)
+docker exec <container-id> <command>         # 컨테이너에서 명령 실행
+docker attach <container-id>                 # 컨테이너 메인 프로세스에 연결
+
+==================================================================
+5. 📋 로그 확인
+==================================================================
+
+docker logs <container-id>                   # 컨테이너 로그 출력
+docker logs -f <container-id>                # 실시간 로그 스트리밍 (follow)
+docker logs --tail 100 <container-id>        # 마지막 100줄만 출력
+docker logs --since 10m <container-id>       # 최근 10분간 로그
+docker logs -t <container-id>                # 타임스탬프 포함
+
+==================================================================
+6. 🌐 네트워크 관리
+==================================================================
+
+docker network ls                            # 네트워크 목록
+docker network inspect <network-name>        # 네트워크 상세 정보
+
+==================================================================
+7. 💾 볼륨 관리
+==================================================================
+
+docker volume ls                             # 볼륨 목록
+docker volume inspect <volume-name>          # 볼륨 상세 정보
+docker volume rm <volume-name>               # 볼륨 삭제
+
+==================================================================
+8. 🧹 정리 및 최적화
+==================================================================
+
+docker system prune                          # 중지된 컨테이너, 네트워크, 이미지 삭제
+docker system prune -a                       # 사용하지 않는 모든 리소스 삭제
+docker system prune -a --volumes             # 볼륨까지 포함하여 전체 정리
+
+==================================================================
+9. 🐳 Docker Compose 명령어
+==================================================================
+
+docker-compose up                            # 서비스 시작 (포그라운드)
+docker-compose up -d                         # 서비스 백그라운드 시작
+docker-compose up --build                    # 이미지 재빌드 후 시작
+docker-compose up <service-name>             # 특정 서비스만 시작
+docker-compose down                          # 서비스 중지 및 컨테이너 삭제
+docker-compose down --rmi all                # 이미지까지 삭제
+docker-compose ps                            # 실행 중인 서비스 목록
+docker-compose ps -a                         # 모든 서비스 목록
+docker-compose logs                          # 모든 서비스 로그
+docker-compose logs -f                       # 실시간 로그 스트리밍
+docker-compose logs -f <service-name>        # 특정 서비스 로그 스트리밍
+docker-compose exec <service-name> bash      # 서비스 컨테이너 쉘 접속
+docker-compose exec <service-name> <command> # 실행 중인 서비스에서 명령 실행
+docker-compose run <service-name> <command>  # 일회성 명령 실행 (새 컨테이너)
+docker-compose start                         # 중지된 서비스 시작
+docker-compose stop                          # 서비스 중지 (컨테이너 유지)
+docker-compose restart                       # 서비스 재시작
+docker-compose build                         # 이미지 빌드
+docker-compose build --no-cache              # 캐시 없이 완전 재빌드
+docker-compose pull                          # 이미지 업데이트
+docker-compose config                        # docker-compose.yml 검증 및 출력
+
+==================================================================
+10. 🔍 디버깅 및 문제 해결
+==================================================================
+
+docker logs --tail 50 <container-id>         # 최근 50줄 로그 확인
+docker inspect --format='{{.State.Health.Status}}' <container-id>  # 헬스체크 상태
+docker inspect --format='{{.NetworkSettings.IPAddress}}' <container-id>  # IP 주소 확인
+docker diff <container-id>                   # 컨테이너 파일시스템 변경사항
+docker events                                # 실시간 Docker 이벤트 모니터링
+docker history <image>                       # 이미지 레이어 히스토리
+docker save -o <file.tar> <image>            # 이미지를 tar 파일로 저장
+docker load -i <file.tar>                    # tar 파일에서 이미지 로드
+docker export <container-id> > <file.tar>    # 컨테이너를 tar 파일로 내보내기
+docker import <file.tar> <name>:<tag>        # tar 파일에서 이미지 가져오기
+
+=========================================================================
+11. 🧹 docker 완전 초기화 후 완전히 새로 빌드
+==================================================================
+
+# 1. 컨테이너 중지 및 삭제 
+docker-compose down
+# 2. 이미지 삭제 (Python 3.11 캐시 제거) 
+docker-compose down --rmi all 
+# 3. 시스템 정리 (선택, 완전 클린)
+docker system prune -a 
+ 4. 클린 빌드 (캐시 무시) 
+docker-compose build --no-cache 
+# 5. 실행 
+docker-compose up -d
