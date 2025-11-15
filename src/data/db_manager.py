@@ -2,14 +2,17 @@
 
 import sqlite3
 import pandas as pd
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Sequence
 from pathlib import Path
 from sqlalchemy import create_engine, insert, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 import logging
 
-from .models import Base, Ticker, DailyPrice, TechnicalIndicator
+try:
+    from .models import Base, Ticker, DailyPrice, TechnicalIndicator
+except ImportError:
+    from models import Base, Ticker, DailyPrice, TechnicalIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +39,45 @@ class DatabaseManager:
         Base.metadata.create_all(self.engine)
         logger.info(f"Database initialized: {db_path}")
     
+    def fetch_ticker_codes(
+        self,
+        market: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[str]:
+        """
+        Load ticker codes stored in the database with optional filtering.
+        """
+        query = self.session.query(Ticker.ticker_code)
+        if market:
+            query = query.filter(Ticker.market == market)
+        query = query.order_by(Ticker.ticker_code)
+        if limit is not None:
+            query = query.limit(limit)
+        return [row.ticker_code for row in query.all()]
+
+    def fetch_ticker_codes_by_indexes(
+        self,
+        indexes: Optional[Sequence[str]] = None,
+    ) -> Dict[str, List[str]]:
+        """
+        Load ticker codes grouped by their listing indexes (market column).
+        """
+        query = self.session.query(Ticker.market, Ticker.ticker_code)
+        if indexes:
+            query = query.filter(Ticker.market.in_(indexes))
+        query = query.order_by(Ticker.market, Ticker.ticker_code)
+
+        grouped: Dict[str, List[str]] = {}
+        for market, ticker_code in query.all():
+            key = market or "UNKNOWN"
+            grouped.setdefault(key, []).append(ticker_code)
+        return grouped
+    
     def get_or_create_ticker(
         self, 
         ticker_code: str, 
         name: Optional[str] = None,
         market: str = "KOSPI",
-        sector: Optional[str] = None
     ) -> int:
         """
         종목 조회 또는 생성
@@ -60,7 +96,6 @@ class DatabaseManager:
             ticker_code=ticker_code,
             name=name,
             market=market,
-            sector=sector
         )
         self.session.add(new_ticker)
         self.session.commit()

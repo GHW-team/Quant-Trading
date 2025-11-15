@@ -1,61 +1,149 @@
-
-#필터링
-#모멘텀 판단 지표 
-#최근 20일 변동성 상위 30% & 최근 수익률 상위 20% & 최근 거래량 상위 50%
-#간단: 고정값으로 하고 백테스트 수동으로 많이하기
-
+from dataclasses import asdict, dataclass
+from typing import Callable, Dict, List, Optional, Sequence
+import numpy as np
 import pandas as pd
 import yfinance as yf
-import numpy as np
+try:
+    from .db_manager import DatabaseManager
+except ImportError:
+    from db_manager import DatabaseManager
+@dataclass
+class TickerMetrics:
+    ticker: str
+    log_volatility: float
+    total_return: float
+    avg_volume: float
 
-#테스트 용 예시 티커
-#test_tickers = ['AAPL', 'META', 'AMZN', 'TSLA', 'SPY']
-#crawling_ticker파일에서 코스피 : kospi, 나스닥=nasdaq100_tickers, S&P = sp500_tickers를 test_tickers 대신 대입할 것
-df_tickers = pd.read_csv('nasdaq100.csv')
-nasdaq100_tickers = df_tickers['Symbol'].tolist()
-
-n=20 #최근 n일 설정
-
-data = yf.download(nasdaq100_tickers, period=(f"{n+1}d"))
-data = data.stack(level=1).rename_axis(['Date', 'Ticker']).reset_index()
-
-
-selected_tickers = []
-for ticker in nasdaq100_tickers:
-    df = data[data['Ticker'] == ticker].copy()
-    df['Return'] = np.log(df['Close'] / df['Close'].shift(1))
-    log_volatility = df['Return'].rolling(window=n).std(ddof=1) * np.sqrt(252) #ddof=1 : 표본 표준편차, log수익률을 쓴 이유는 연율화로 비교하기 위해
-    log_volatility =  log_volatility.iloc[-1]
-    print ({ticker},log_volatility) #변동성은 주가가 하락해도 양수로 나옴에 유의
-
-    #최근 n일 수익률
-    total_return = df['Close'].iloc[-1] / df['Close'].iloc[-n-1] - 1
-
-    #최근 n일 평균 거래량
-    avg_volume = df['Volume'].iloc[-n:].mean()
-
-    selected_tickers.append({
-        'Ticker': ticker,
-        'Log_Volatility': log_volatility,
-        'Total_Return': total_return,
-        'Avg_Volume': avg_volume
-    })
-
-    print(selected_tickers)
-
-filtered_df = pd.DataFrame(selected_tickers)
-top_return = filtered_df['Total_Return'].quantile(0.8)
-top_volume = filtered_df['Avg_Volume'].quantile(0.5)
-
-final_selection = filtered_df[
-    (filtered_df['Total_Return']>=top_return)&
-    (filtered_df['Avg_Volume']>=top_volume)
-]
-
-final_tickers = final_selection['Ticker'].tolist()
-print("✅ 최종 필터링된 티커:", final_tickers)
-#방법1. ema_momentum = ema.iloc[-1] - ema.iloc[0]   
-#문제점: 20일 안에 추세반전이 나오면 왜곡되지않음??
-
-
+@dataclass
+class FilteredUniverse: #
+    tickers_by_index: Dict[str, List[str]]
+    metrics: pd.DataFrame
+    @property
+    def flattened(self) -> List[str]:
+        merged: List[str] = []
+        for tickers in self.tickers_by_index.values():
+            merged.extend(tickers)
+        return merged
     
+class TickerUniverse:
+    def __init__(
+        self,
+        db_manager: DatabaseManager,
+        listing_indexes: Optional[Sequence[str]] = None,
+    ) -> None:
+        self.db_manager = db_manager
+        self.listing_indexes = list(listing_indexes) if listing_indexes else None
+    def load_grouped(self) -> Dict[str, List[str]]:
+        return self.db_manager.fetch_ticker_codes_by_indexes(self.listing_indexes)
+    def load(self) -> List[str]:
+        tickers: List[str] = []
+        for codes in self.load_grouped().values():
+            tickers.extend(codes)
+        return tickers
+    
+class MarketDataService:
+    def __init__(self, downloader: Optional[Callable[..., pd.DataFrame]] = None) -> None:
+        self.downloader = downloader or yf.download
+    def fetch(self, tickers: Sequence[str], lookback: int) -> pd.DataFrame:
+        tickers_list = list(tickers)
+        if not tickers_list:
+            return pd.DataFrame()
+        period = f"{lookback + 1}d"
+        raw_data = self.downloader(tickers_list, period=period)
+        if raw_data.empty:
+            return pd.DataFrame()
+        if isinstance(raw_data.columns, pd.MultiIndex):
+            return raw_data.stack(level=1).rename_axis(['Date', 'Ticker']).reset_index()
+        single_df = raw_data.reset_index().copy()
+        single_df['Ticker'] = tickers_list[0]
+        cols = ['Date', 'Ticker'] + [col for col in single_df.columns if col not in ['Date', 'Ticker']]
+        return single_df[cols]
+    
+class TickerStatisticsCalculator:
+    def __init__(self, lookback: int) -> None:
+        self.lookback = lookback
+    def build_metrics(self, data: pd.DataFrame) -> List[TickerMetrics]:
+        metrics: List[TickerMetrics] = []
+        if data.empty:
+            return metrics
+        for ticker, ticker_df in data.groupby('Ticker'):
+            ticker_df = ticker_df.sort_values('Date').copy()
+            if len(ticker_df) <= self.lookback:
+                continue
+            ticker_df['Return'] = np.log(ticker_df['Close'] / ticker_df['Close'].shift(1))
+            rolling_std = ticker_df['Return'].rolling(window=self.lookback).std(ddof=1)
+            log_volatility = rolling_std.iloc[-1] * np.sqrt(252)
+            total_return = ticker_df['Close'].iloc[-1] / ticker_df['Close'].iloc[-self.lookback - 1] - 1
+            avg_volume = ticker_df['Volume'].iloc[-self.lookback:].mean()
+            metrics.append(
+                TickerMetrics(
+                    ticker=ticker,
+                    log_volatility=log_volatility,
+                    total_return=total_return,
+                    avg_volume=avg_volume,
+                )
+            )
+        return metrics
+    
+class TickerSelector:
+    def __init__(self, return_quantile: float = 0.8, volume_quantile: float = 0.5) -> None:
+        self.return_quantile = return_quantile
+        self.volume_quantile = volume_quantile
+    def select(self, metrics: List[TickerMetrics]) -> pd.DataFrame:
+        if not metrics:
+            return pd.DataFrame()
+        metrics_df = pd.DataFrame([asdict(metric) for metric in metrics])
+        top_return = metrics_df['total_return'].quantile(self.return_quantile)
+        top_volume = metrics_df['avg_volume'].quantile(self.volume_quantile)
+        return metrics_df[
+            (metrics_df['total_return'] >= top_return)
+            & (metrics_df['avg_volume'] >= top_volume)
+        ].reset_index(drop=True)
+    
+class TickerFilteringWorkflow:
+    def __init__(
+        self,
+        db_path: str = "data/database/stocks.db",
+        listing_indexes: Optional[Sequence[str]] = None,
+        lookback: int = 20,
+        return_quantile: float = 0.8,
+        volume_quantile: float = 0.5,
+        downloader: Optional[Callable[..., pd.DataFrame]] = None,
+    ) -> None:
+        self.db_manager = DatabaseManager(db_path=db_path)
+        self.universe = TickerUniverse(self.db_manager, listing_indexes=listing_indexes)
+        self.market_data = MarketDataService(downloader=downloader)
+        self.statistics = TickerStatisticsCalculator(lookback=lookback)
+        self.selector = TickerSelector(
+            return_quantile=return_quantile,
+            volume_quantile=volume_quantile,
+        )
+    def run(self) -> FilteredUniverse:
+        grouped_tickers = self.universe.load_grouped()
+        if not grouped_tickers:
+            print("No tickers found for the requested listing indexes.")
+            return FilteredUniverse(tickers_by_index={}, metrics=pd.DataFrame())
+        filtered_by_index: Dict[str, List[str]] = {}
+        selected_frames: List[pd.DataFrame] = []
+        for index_name, tickers in grouped_tickers.items():
+            if not tickers:
+                continue
+            market_data = self.market_data.fetch(tickers, self.statistics.lookback)
+            metrics = self.statistics.build_metrics(market_data)
+            selected_df = self.selector.select(metrics)
+            if selected_df.empty:
+                continue
+            selected_df.insert(0, 'listing_index', index_name)
+            filtered_by_index[index_name] = selected_df['ticker'].tolist()
+            selected_frames.append(selected_df)
+        combined_df = (
+            pd.concat(selected_frames, ignore_index=True) if selected_frames else pd.DataFrame()
+        )
+        if not combined_df.empty:
+            print(combined_df)
+        print("Filtered tickers by index:", filtered_by_index)
+        return FilteredUniverse(tickers_by_index=filtered_by_index, metrics=combined_df)
+    
+if __name__ == '__main__':
+    workflow = TickerFilteringWorkflow()
+    workflow.run()
