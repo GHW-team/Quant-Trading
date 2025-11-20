@@ -2,7 +2,7 @@ from src.data.indicator_calculator import IndicatorCalculator
 import pandas as pd
 import numpy as np
 
-
+#MACD delta 계산
 class DifferencingMACD:
     def __init__(self, indicator_calc: IndicatorCalculator | None = None):
         self.calc = indicator_calc or IndicatorCalculator()
@@ -27,7 +27,7 @@ class DifferencingMACD:
             return pd.DataFrame()
         return pd.concat(frames, ignore_index=True)
 
-
+#테스트용 데이터
 if __name__ == "__main__":
     dates = pd.date_range("2024-01-01", periods=40, freq="D")
 
@@ -58,3 +58,6 @@ if __name__ == "__main__":
     macd = DifferencingMACD()
     print(len(sample))
     print(macd.run(sample).tail(30))
+
+
+

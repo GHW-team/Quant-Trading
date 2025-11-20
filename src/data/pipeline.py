@@ -6,7 +6,11 @@ from dotenv import load_dotenv
 from src.data.data_fetcher import StockDataFetcher
 from src.data.db_manager import DatabaseManager
 from src.data.calculate_and_save import IndicatorPipeline
+from src.data.all_ticker import TickerUniverse
 
+#TickerUniverse 통합: pipeline.py가 from src.data.all_ticker import TickerUniverse를 import하고 self.ticker_provider를 생성합니다.
+#티커 결정 로직 변경: DEFAULT_TICKERS가 비어 있으면 DEFAULT_EXCHANGES(미지정 시 지원 거래소 전체)로 TickerUniverse.get()을 호출해 리스트를 만듭니다. KOSPI/KOSDAQ 티커에 .KS/.KQ 접미사가 자동 붙습니다.
+#Step-by-step 모드도 동일한 fallback 적용: run_step_by_step에서도 DEFAULT_TICKERS가 비어 있으면 DEFAULT_EXCHANGES로 티커를 로드합니다.
 # .env 파일 로드 (아직 로드되지 않았을 경우)
 load_dotenv()
 
@@ -19,15 +23,18 @@ class DataPipeline:
             'DATABASE_PATH', 'data/database/stocks.db'
         )
 
-        max_workers = int(os.getenv('FETCH_MAX_WORKERS', '5'))
+        max_workers = int(os.getenv('FETCH_MAX_WORKERS', '3'))
         max_retries = int(os.getenv('FETCH_MAX_RETRIES', '3'))
+        fetch_delay_sec = float(os.getenv('FETCH_PER_REQUEST_DELAY_SEC', '1.5'))  # 변경 사항: 요청 간 지연(초)
 
         self.db_manager = DatabaseManager(db_path=self.db_path)
         self.fetcher = StockDataFetcher(
             max_retries=max_retries,
             max_workers=max_workers,
+            per_request_delay_sec=fetch_delay_sec,  # 변경 사항: 요청 간 지연(초)
         )
         self.indicator_pipeline = IndicatorPipeline(db_path=self.db_path)
+        self.ticker_provider = TickerUniverse() #변경사항: TickerUniverse 임포트
 
         logger.info("DataPipeline initialized")
     
@@ -48,6 +55,19 @@ class DataPipeline:
             ticker_list = [
                 t.strip() for t in tickers_str.split(',') if t.strip()
             ]
+            if not ticker_list:
+                exchanges_str = os.getenv('DEFAULT_EXCHANGES','')
+                exchanges = [
+                    e.strip() for e in exchanges_str.split(',') if e.strip()
+                ] or None
+                ticker_list = self.ticker_provider.get(exchanges)
+                logger.info(
+                    "Loaded %d tickers from TickerUniverse (exchanges=%s)",
+                    len(ticker_list),
+                    exchanges or "all",
+                )
+        
+        #ticker_list가 비어 있으면 DEFAULT_TICKERS를 먼저 확인하고, 없으면 DEFAULT_EXCHANGES에 지정된 거래소(없으면 모든 지원 거래소)의 티커를 TickerUniverse로 불러와 자동 리스트를 생성
         
         start_date = start_date or os.getenv('START_DATE')
         end_date = end_date or os.getenv('END_DATE')
@@ -198,6 +218,17 @@ class DataPipeline:
         if ticker_list is None:
             tickers_str = os.getenv('DEFAULT_TICKERS', '')
             ticker_list = [t.strip() for t in tickers_str.split(',') if t.strip()]
+            if not ticker_list:
+                exchanges_str = os.getenv('DEFAULT_EXCHANGES','')
+                exchanges = [
+                    e.strip() for e in exchanges_str.split(',') if e.strip()
+                ] or None
+                ticker_list = self.ticker_provider.get(exchanges)
+                logger.info(
+                    "Loaded %d tickers from TickerUniverse (exchanges=%s)",
+                    len(ticker_list),
+                    exchanges or "all",
+                )
 
         results = {}
         data_dict = {}
@@ -292,3 +323,4 @@ def run_pipeline(
         end_date=end_date,
         indicator_list=indicator_list,
     )
+

@@ -19,15 +19,17 @@ logger = logging.getLogger(__name__)
 
 class StockDataFetcher:
     """yfinance를 사용한 주식 데이터 수집기"""
-    def __init__(self,max_workers: int=5,max_retries: int=3):
+    def __init__(self, max_workers: int = 3, max_retries: int = 3, per_request_delay_sec: float = 1.5): #기본 시간 지연 추가
         """
         Args:
             max_workers: 동시 실행 스레드 수 (Yahoo API 부담 고려)
             max_retries: 재시도 횟수
+            per_request_delay_sec: 개별 다운로드 사이 강제 지연(초)  # 변경 사항
         """
         self.max_workers = max_workers
         self.max_retries = max_retries
-        
+        self.per_request_delay_sec = per_request_delay_sec  # 변경 사항
+
     def fetch_single_stock(
             self, 
             ticker: str, 
@@ -65,6 +67,8 @@ class StockDataFetcher:
                     logger.warning(f"{ticker}: Insufficient data ({len(df)} rows)")
 
                 logger.info(f"{ticker}: {len(df)} records fetched")
+                if self.per_request_delay_sec > 0:  # 변경 사항: 요청 간 지연
+                    time.sleep(self.per_request_delay_sec)
                 return df
 
             except RequestException as e:
@@ -170,6 +174,8 @@ class StockDataFetcher:
                     return None
                 
                 logger.info(f"{ticker}: {len(df)} records fetched")
+                if self.per_request_delay_sec > 0:  # 변경 사항: 요청 간 지연
+                    time.sleep(self.per_request_delay_sec)
                 return df
 
             except RequestException as e:
