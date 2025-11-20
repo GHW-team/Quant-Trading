@@ -42,7 +42,7 @@ def export_features_daily(ticker=None, start_date=None, end_date=None):
 # 하드코딩 테스트용
 
 TICKER = "005930.KS"
-START = "2025-10-20"
-END = "2025-10-30"
+START = "2024-01-01"
+END = "2025-11-18"
 
 export_features_daily(TICKER, START, END)

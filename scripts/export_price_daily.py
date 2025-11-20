@@ -41,8 +41,8 @@ def export_price_daily(ticker, start_date, end_date):
         w.writerows(cur)
 
 TICKERS = "005930.KS"
-START = "2025-10-20"
-END = "2025-10-30"
+START = "2024-01-01"
+END = "2025-11-18"
 
 export_price_daily(TICKERS, START, END)
 

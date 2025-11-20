@@ -18,7 +18,7 @@ AUTO_ADJUST = FETCH_CFG.get("auto_adjust", True)
 
 FEATURE_CFG = cfg.get("features", {})
 MA_WINDOWS = FEATURE_CFG.get("ma_windows", [5, 20, 200])
-# python -m scripts.fetch_price
+# python -m scripts.data_pipeline
 
 def run_for_ticker(ticker):
     raw = download_yf(ticker, START, END, auto_adjust=True)
