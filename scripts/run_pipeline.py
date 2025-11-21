@@ -145,7 +145,7 @@ def _resolve_tickers(config: Dict[str, Any]) -> Any:
         return tickers
     if exchanges:
         return TickerUniverse().get(exchanges)
-    return None  # DataPipeline 내부 기본값 사용
+    raise ValueError("티커 리스트가 비어 있습니다. tickers 또는 exchanges를 지정하세요.")
 
 
 def run_full_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
@@ -157,6 +157,7 @@ def run_full_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
         db_path=config["database_path"],
         max_workers=config["max_workers"],
         max_retries=config["max_retries"],
+        batch_size_default=config["batch_size"],
     ) as pipeline:
         results = pipeline.run_full_pipeline(
             ticker_list=_resolve_tickers(config),
@@ -181,6 +182,7 @@ def run_price_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
         db_path=config["database_path"],
         max_workers=config["max_workers"],
         max_retries=config["max_retries"],
+        batch_size_default=config["batch_size"],
     ) as pipeline:
         results = pipeline.run_price_pipeline(
             ticker_list=_resolve_tickers(config),
@@ -203,6 +205,7 @@ def run_indicator_pipeline(config: Dict[str, Any], logger: logging.Logger) -> No
         db_path=config["database_path"],
         max_workers=config["max_workers"],
         max_retries=config["max_retries"],
+        batch_size_default=config["batch_size"],
     ) as pipeline:
         results = pipeline.run_indicator_pipeline(
             ticker_list=_resolve_tickers(config),

@@ -1,6 +1,5 @@
 # StockDataFetcher
 import logging
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
@@ -19,17 +18,14 @@ class StockDataFetcher:
         self,
         max_workers: int = 3,
         max_retries: int = 3,
-        per_request_delay_sec: float = 1.5,
     ):
         """
         Args:
             max_workers: 동시 실행 스레드 수
             max_retries: 재시도 횟수
-            per_request_delay_sec: 요청 간 지연 시간(초)
         """
         self.max_workers = max_workers
         self.max_retries = max_retries
-        self.per_request_delay_sec = per_request_delay_sec
 
     # ------------------------------------------------------------------ #
     # 내부 단일 호출
@@ -63,8 +59,6 @@ class StockDataFetcher:
                 )
 
                 logger.info("%s: %d records fetched", ticker, len(df))
-                if self.per_request_delay_sec > 0:
-                    time.sleep(self.per_request_delay_sec)
                 return df
 
             except RequestException as exc:
@@ -117,8 +111,6 @@ class StockDataFetcher:
                 )
 
                 logger.info("%s: %d records fetched", ticker, len(df))
-                if self.per_request_delay_sec > 0:
-                    time.sleep(self.per_request_delay_sec)
                 return df
 
             except RequestException as exc:
@@ -226,7 +218,7 @@ if __name__ == "__main__":
     print("StockDataFetcher quick self-test")
     print("=" * 70)
 
-    fetcher = StockDataFetcher(max_workers=2, max_retries=2, per_request_delay_sec=0.5)
+    fetcher = StockDataFetcher(max_workers=2, max_retries=2)
     sample = ["005930.KS"]
     df_dict = fetcher.fetch_multiple_by_period(ticker_list=sample, period="1mo")
     for t, df in df_dict.items():
