@@ -1,138 +1,336 @@
-import os
 import logging
-from typing import List,Optional,Dict
-from dotenv import load_dotenv
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Tuple
 
 from src.data.data_fetcher import StockDataFetcher
 from src.data.db_manager import DatabaseManager
-from src.data.calculate_and_save import IndicatorPipeline
-
-# .env 파일 로드 (아직 로드되지 않았을 경우)
-load_dotenv()
+from src.data.indicator_calculator import IndicatorCalculator
 
 logger = logging.getLogger(__name__)
 
 class DataPipeline:
-    def __init__(self,db_path: str = None):
-        #Load variables from env
-        self.db_path = db_path or os.getenv(
-            'DATABASE_PATH', 'data/database/stocks.db'
-        )
-
-        max_workers = int(os.getenv('FETCH_MAX_WORKERS', '5'))
-        max_retries = int(os.getenv('FETCH_MAX_RETRIES', '3'))
+    def __init__(
+        self,
+        db_path: str = None,
+        max_workers: int = None,
+        max_retries: int = None
+    ):
+        # config.yaml 또는 기본값에서 설정 로드
+        self.db_path = db_path or 'data/database/stocks.db'
+        max_workers = max_workers or 5
+        max_retries = max_retries or 3
 
         self.db_manager = DatabaseManager(db_path=self.db_path)
         self.fetcher = StockDataFetcher(
             max_retries=max_retries,
             max_workers=max_workers,
         )
-        self.indicator_pipeline = IndicatorPipeline(db_path=self.db_path)
+        self.calculator = IndicatorCalculator()
 
         logger.info("DataPipeline initialized")
-    
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    @staticmethod
+    def _convert_period_to_dates(period: str) -> Tuple[str, str]:
+        """
+        Period 문자열을 start_date, end_date로 변환합니다.
+
+        Args:
+            period: 기간 문자열 (예: "1y", "6m", "3m", "1m")
+
+        Returns:
+            (start_date, end_date) 튜플 (YYYY-MM-DD 형식)
+        """
+        today = datetime.now()
+
+        # Period에서 숫자와 단위 추출
+        if not period or len(period) < 2:
+            raise ValueError(f"Invalid period format: {period}")
+
+        amount = int(period[:-1])
+        unit = period[-1].lower()
+
+        if unit == 'y':
+            start_dt = today.replace(year=today.year - amount)
+        elif unit == 'm':
+            # 월 계산
+            month = today.month - amount
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            start_dt = today.replace(year=year, month=month)
+        elif unit == 'd':
+            start_dt = today - timedelta(days=amount)
+        elif unit == 'w':
+            start_dt = today - timedelta(weeks=amount)
+        else:
+            raise ValueError(f"Unknown period unit: {unit}. Use 'y', 'm', 'w', or 'd'")
+
+        start_date = start_dt.strftime('%Y-%m-%d')
+        end_date = today.strftime('%Y-%m-%d')
+
+        logger.debug(f"Converted period '{period}' to start_date={start_date}, end_date={end_date}")
+        return start_date, end_date
+
+    def _calculate_extended_start_date(self, start_date: Optional[str], indicator_list: List[str]) -> Optional[str]:
+        """
+        지표 계산을 위해 '안전 마진'이 포함된 과거 시작 날짜를 계산합니다.
+
+        영업일/휴일을 고려하여 1.6배수를 적용하고 추가 10일의 여유를 더합니다.
+
+        Args:
+            start_date: 원래 요청한 시작 날짜 (YYYY-MM-DD 형식)
+            indicator_list: 지표 리스트
+
+        Returns:
+            확장된 시작 날짜 (YYYY-MM-DD 형식), start_date가 None이면 None
+        """
+        if not start_date:
+            return None
+
+        # 필요한 룩백 일수 조회 (예: ma_200 -> 200일)
+        lookback_days = IndicatorCalculator.get_lookback_days(indicator_list)
+
+        # 영업일/휴일 고려하여 1.6배수 적용 + 10일 여유 (넉넉하게 잡음)
+        # 이유: 일주일에 5개 영업일만 있으므로 약 1.4~1.6배가 필요함
+        safe_lookback = int(lookback_days * 1.6) + 10
+
+        dt_start = pd.to_datetime(start_date)
+        dt_extended_start = dt_start - timedelta(days=safe_lookback)
+
+        extended_date_str = dt_extended_start.strftime('%Y-%m-%d')
+        logger.info(f"Date extended for lookback: {start_date} → {extended_date_str} (-{safe_lookback} days, "
+                   f"base lookback: {lookback_days} days)")
+        return extended_date_str
+
     def run_full_pipeline(
         self,
-        ticker_list: Optional[List[str]] = None,
+        ticker_list: List[str],
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        period: Optional[str] = None,
+        interval: str = "1d",
+        actions: bool = False,
+        update_if_exists: bool = True,
         indicator_list: List[str] = None,
-        update_if_exists: Optional[bool] = None,
-        period: Optional[str] = "1y",
-        interval: Optional[str] = "1d",
         version: Optional[str] = 'v1.0',
-    )-> dict:
-        #=========Load variables from env============
-        if ticker_list is None:
-            tickers_str = os.getenv('DEFAULT_TICKERS','')
-            ticker_list = [
-                t.strip() for t in tickers_str.split(',') if t.strip()
-            ]
-        
-        start_date = start_date or os.getenv('START_DATE')
-        end_date = end_date or os.getenv('END_DATE')
+        batch_size: int = 100,
+    )-> Dict[str,pd.DataFrame]:
+        """
+        다음 단계 실행 (배치 처리)
+        1.주식 종목 OHLCV데이터 불러오기
+        2.OHLCV 데이터 DB 저장
+        3.가격 데이터로 지표 계산
+        4.지표 데이터 DB 저장
 
-        if indicator_list is None:
-            indicators_str = os.getenv('DEFAULT_INDICATORS','')
-            indicator_list = [
-                i.strip() for i in indicators_str.split(',') if i.strip()
-            ]
+        Args:
+            ticker_list : 종목 리스트
+            start_date : 시작 날짜
+            end_date : 종료 날짜
+            period : 기간 (현재 날짜 기준)
+            ==> (start/end) 와 period 둘중 하나만 입력
+            interval : 데이터 간격
+            actions : 분할 등 부가정보 포함 여부
+            update_if_exists: db에 존재하는 데이터 새로 업데이트하기
+            indicator_list : 지표 리스트
+            version : 지표 계산 로직 버전
+            batch_size: 배치 크기
 
-        if update_if_exists is None:
-            update_if_exists = (
-                os.getenv('UPDATE_IF_EXISTS','false').lower() == 'true'
-            )
-
-        logger.info(f"Starting full pipeline for {len(ticker_list)} tickers")
-        logger.info(f"Configuration: data from {start_date} to {end_date}")
-        logger.info(f"Indicators : {indicator_list}")
+        Returns:
+            {ticker : DataFrame} 딕셔너리
+            DataFrame: OHLCV데이터 + 지표데이터
+        """
 
         results = {
             'step1_fetch': {},
-            'step2_save' : {},
-            'step3_4_indicators': {},
+            'step2_save_price' : {},
+            'step3_calculate': {},
+            'step4_save_indicator' : {},
             'summary': {},
         }
-            
+
         try:
-            #===========1.data fetch=============
-            logger.info("="*60)
-            logger.info("Step1: Fetching data from yfinance")
-            logger.info("="*60)
+            #start/end or period validation
+            if (start_date or end_date) and period:
+                raise ValueError(
+                    """
+                    Ambiguous configuration!!
+                    날짜 지정 방식(start/end)과 기간 지정 방식(period)둘 중 하나만 선택하세요!!
+                    """
+                )
 
-            df_dict = self.fetcher.fetch_with_date_range(
-                ticker_list=ticker_list,
-                start_date=start_date,
-                end_date=end_date,
-                interval=interval,
-            )
-
-            results['step1_fetch']={
-                ticker : len(df) for ticker, df in df_dict.items()
-            }
-            logger.info(f"Step 1 complete: {len(df_dict)} tickers fetched")
-
-            #===========2.data store=============
-            logger.info("="*60)
-            logger.info("Step2: Saving price data to database")
-            logger.info("="*60)
-
-            for ticker, df in df_dict.items():
-                try:
-                    save_count = self.db_manager.save_price_data(
-                        ticker_code=ticker,
-                        stock_df=df,
-                        update_if_exists=update_if_exists,
+            if (start_date is not None and end_date is None) or \
+                (start_date is None and end_date is not None):
+                    raise ValueError(
+                        """
+                        Incomplete date range!!
+                        start_date 와 end_date는 모두 입력되거나 모두 입력되지 않아야 합니다.
+                        """
                     )
-                    results['step2_save'][ticker] = save_count
-                except Exception as e:
-                    logger.error(f"Failed to save{ticker}: {e}")
-                    results['step2_save'][ticker] = 0
-            
-            logger.info(f"Step 2 completed")
-                    
-            #===========3.indicator calculate and save=============
-            logger.info("="*60)
-            logger.info("Step 3-4: Calculating and saving indicators")
-            logger.info("="*60)
 
-            for ticker in ticker_list:
+            # ============ Pre-processing: Period를 start_date/end_date로 변환 ============
+            if period:
+                start_date, end_date = self._convert_period_to_dates(period)
+                logger.info(f"Period '{period}' converted to start_date={start_date}, end_date={end_date}")
+
+            # ============ Lookback 계산 및 적용 (안전 마진 포함) ============
+            original_start_date = start_date  # 원래 요청한 start_date 저장
+            start_date = self._calculate_extended_start_date(start_date, indicator_list)
+
+            # 전체 결과를 저장할 dict
+            all_calculated_dict = {}
+
+            # 배치로 처리
+            total_tickers = len(ticker_list)
+            num_batches = (total_tickers + batch_size - 1) // batch_size
+            logger.info(f"\nProcessing {total_tickers} tickers in {num_batches} batches of size {batch_size}")
+
+            for i in range(0, total_tickers, batch_size):
+                batch_tickers = ticker_list[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Batch {batch_num}/{num_batches}: Processing {len(batch_tickers)} tickers")
+                logger.info(f"{'='*60}")
+
+                # Step 1: Fetch batch data (조정된 date range로 fetch)
                 try:
-                    saved_indicators = self.indicator_pipeline.process_single_ticker(
-                        ticker=ticker,
+                    logger.info(f"Step 1: Fetching data for batch {batch_num}...")
+                    batch_df_dict = self.fetcher.fetch_multiple_by_date(
+                        ticker_list=batch_tickers,
                         start_date=start_date,
                         end_date=end_date,
-                        indicator_list=indicator_list,
-                        version=version,
+                        interval=interval,
+                        actions=actions,
                     )
-                    results['step3_4_indicators'][ticker] = saved_indicators
-                    logger.info(f"Saved {saved_indicators} indicator records for {ticker}")
+
+                    logger.info(f"Fetched {len(batch_df_dict)} tickers")
+                    results['step1_fetch'].update({
+                        ticker : len(df) for ticker, df in batch_df_dict.items()
+                    })
 
                 except Exception as e:
-                    logger.error(f"Failed to process indicators for {ticker}: {e}")
-                    results['step3_4_indicators'][ticker] = 0
-                    
-            logger.info(f"Step 3-4 complete")
+                    logger.error(f"Failed to fetch batch {batch_num}: {e}")
+                    for ticker in batch_tickers:
+                        results['step1_fetch'][ticker] = 0
+                    continue
+
+                # Step 2: Save batch price data (original_start_date 기준으로 필터링)
+                try:
+                    logger.info(f"Step 2: Saving price data for batch {batch_num}...")
+
+                    # original_start_date 이후의 데이터만 필터링
+                    filtered_price_dict = {}
+                    for ticker, df in batch_df_dict.items():
+                        if 'date' in df.columns:
+                            filtered_df = df[df['date'] >= original_start_date].copy()
+                        else:
+                            # date column이 없으면 오류!!
+                            raise ValueError(f"There is no 'date' column in {ticker} DataFrame")
+
+                        if not filtered_df.empty:
+                            filtered_price_dict[ticker] = filtered_df
+
+                    if filtered_price_dict:
+                        batch_save_price_results = self.db_manager.save_price_data(
+                            df_dict=filtered_price_dict,
+                            update_if_exists=update_if_exists,
+                        )
+                        results['step2_save_price'].update(batch_save_price_results)
+                        logger.info(f"Saved price data for batch {batch_num} (filtered to original_start_date={original_start_date})")
+
+                except Exception as e:
+                    logger.error(f"Failed to save price data for batch {batch_num}: {e}")
+                    for ticker in batch_df_dict.keys():
+                        results['step2_save_price'][ticker] = 0
+                    continue
+
+                # Step 3: Calculate indicators for batch
+                batch_calculated_dict = {}
+                try:
+                    logger.info(f"Step 3: Calculating indicators for batch {batch_num}...")
+                    for ticker, df in batch_df_dict.items():
+                        try:
+                            calculated_df = self.calculator.calculate_indicators(
+                                df=df,
+                                indicator_list=indicator_list
+                            )
+
+                            batch_calculated_dict[ticker] = calculated_df
+                            results['step3_calculate'][ticker] = len(calculated_df)
+                            logger.debug(f"Calculated {len(calculated_df)} records for {ticker}")
+
+                        except Exception as e:
+                            logger.error(f"Failed to calculate indicators for {ticker}: {e}")
+                            results['step3_calculate'][ticker] = 0
+
+                    logger.info(f"Calculated indicators for {len(batch_calculated_dict)} tickers in batch {batch_num}")
+
+                except Exception as e:
+                    logger.error(f"Failed to calculate indicators for batch {batch_num}: {e}")
+                    continue
+
+                # Step 4: Save indicators (original_start_date 기준으로 필터링)
+                try:
+                    logger.info(f"Step 4: Saving indicators for batch {batch_num}...")
+
+                    # original_start_date 이후의 지표 데이터만 필터링
+                    filtered_indicator_dict = {}
+                    for ticker, df in batch_calculated_dict.items():
+                        # index.name이 대문자 'Date'일 수 있으므로 대소문자 무시
+                        has_date_index = df.index.name and df.index.name.lower() == 'date'
+                        has_date_column = 'date' in df.columns
+
+                        if has_date_index:
+                            # Index가 Date인 경우 - Date를 컬럼으로 변환 후 필터링
+                            df_with_date_col = df.reset_index()
+                            df_with_date_col.columns = df_with_date_col.columns.str.strip().str.lower()
+                            filtered_df = df_with_date_col[
+                                pd.to_datetime(df_with_date_col['date']).dt.date.astype(str) >= original_start_date
+                            ].copy()
+                        elif has_date_column:
+                            # date가 column인 경우
+                            filtered_df = df[df['date'] >= original_start_date].copy()
+                        else:
+                            # date column이 없으면 전체 데이터 사용
+                            filtered_df = df.copy()
+
+                        if not filtered_df.empty:
+                            # NaN 검증: original_start_date 범위에 NaN이 있으면 경고
+                            nan_cols = filtered_df.columns[filtered_df.isna().any()].tolist()
+                            if nan_cols:
+                                logger.warning(
+                                    f"⚠ {ticker}: NaN values found in original date range for columns: {nan_cols}. "
+                                    f"Lookback may be insufficient or DB data incomplete."
+                                )
+
+                            filtered_indicator_dict[ticker] = filtered_df
+
+                    if filtered_indicator_dict:
+                        batch_save_indicator_results = self.db_manager.save_indicators(
+                            indicator_data_dict=filtered_indicator_dict,
+                            version=version,
+                        )
+                        results['step4_save_indicator'].update(batch_save_indicator_results)
+                        logger.info(f"Saved indicators for batch {batch_num} (filtered to original_start_date={original_start_date})")
+
+                except Exception as e:
+                    logger.error(f"Failed to save indicators for batch {batch_num}: {e}")
+                    for ticker in batch_calculated_dict.keys():
+                        results['step4_save_indicator'][ticker] = 0
+                    continue
+
+                # 메모리 정리
+                all_calculated_dict.update(batch_calculated_dict)
+                del batch_df_dict
+                del batch_calculated_dict
 
             #============Summary=============
             logger.info("="*60)
@@ -140,131 +338,387 @@ class DataPipeline:
             logger.info("="*60)
 
             total_fetched = sum(results['step1_fetch'].values())
-            total_saved_prices = sum(results['step2_save'].values())
-            total_saved_indicators = sum(results['step3_4_indicators'].values())
+            total_saved_prices = sum(results['step2_save_price'].values())
+            total_calculated = sum(results['step3_calculate'].values())
+            total_saved_indicators = sum(results['step4_save_indicator'].values())
 
             results['summary'] = {
                 'total_fetched_records': total_fetched,
                 'total_saved_prices': total_saved_prices,
-                'total_saved_indicators': total_saved_indicators,
+                'total_calculated_indicators': total_calculated,
+                'total_saved_indicators' : total_saved_indicators,
                 'tickers_processed': len(ticker_list),
+                'batches_processed': num_batches,
                 'status': 'success'
             }
 
             logger.info(f"Total fetched records: {total_fetched}")
             logger.info(f"Total saved price records: {total_saved_prices}")
+            logger.info(f"Total calculated indicator records: {total_calculated}")
             logger.info(f"Total saved indicator records: {total_saved_indicators}")
             logger.info(f"✓ Pipeline completed successfully")
+            
+            logger.info(f"\n{'='*60}")
+            logger.info(f"ToTal Results: {results}")
+            logger.info(f"{'='*60}")
 
-            return results
+            return all_calculated_dict
 
         except Exception as e:
-            logger.error(f"Plpeline failed: {e}")
+            logger.error(f"Pipeline failed: {e}")
             results['summary'] = {
                 'status': 'failed',
                 'error': str(e)
             }
             raise
-        finally:
-            self.close()
     
-    def run_step_by_step(
+    def run_price_pipeline(
             self,
-            ticker_list: Optional[List[str]] = None,
-            step_config: Optional[Dict] = None,
-    ) -> dict:
-        if step_config is None: 
-            step_config = {}
-        
-        run_step1_fetch = step_config.get('step1_fetch', False)
-        run_step2_save = step_config.get('step2_save', False)
-        run_step3_4_indicators = step_config.get('step3_4_indicators', False)
+            ticker_list: List[str],
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            period: Optional[str] = None,
+            interval: str = "1d",
+            actions: bool = False,
+            update_if_exists: bool = True,
+            batch_size: int = 100,
+    )-> Dict[str,pd.DataFrame]:
+        """
+        주식 종목 OHLCV데이터 불러오기 및 DB 저장 (배치 처리)
 
-        start_date = step_config.get('start_date') or os.getenv('START_DATE')
-        end_date = step_config.get('end_date') or os.getenv('END_DATE')
+        Args:
+            ticker_list : 종목 리스트
+            start_date : 시작 날짜
+            end_date : 종료 날짜
+            period : 기간 (현재 날짜 기준)
+            ==> (start/end) 와 period 둘중 하나만 입력
+            interval : 데이터 간격
+            actions : 분할 등 부가정보 포함 여부
+            update_if_exists: db에 존재하는 데이터 새로 업데이트하기
+            batch_size: 배치 크기
 
-        indicator_str = step_config.get('indicators') or os.getenv(
-            'DEFAULT_INDICATORS', 'ma_5,ma_20,ma_200,macd'
-        )
-        if isinstance(indicator_str,str):
-            indicator_list = [
-                i.strip() for i in indicator_str.split(',') if i.strip()
-            ]
-        else:
-            indicator_list = indicator_str
-
-        update_if_exists = step_config.get('update_if_exists', False)
-
-        if ticker_list is None:
-            tickers_str = os.getenv('DEFAULT_TICKERS', '')
-            ticker_list = [t.strip() for t in tickers_str.split(',') if t.strip()]
-
-        results = {}
-        data_dict = {}
-
-        try: 
-            # Step 1
-            if run_step1_fetch:
-                data_dict = self.fetcher.fetch_with_date_range(
-                    ticker_list=ticker_list,
-                    start_date=start_date,
-                    end_date=end_date,
+        Returns:
+            {ticker : DataFrame} 딕셔너리
+            DataFrame: OHLCV데이터
+        """
+        results = {
+            'step1_fetch': {},
+            'step2_save_price' : {},
+            'summary' : {},
+        }
+        try:
+            #start/end or period validation
+            if (start_date or end_date) and period:
+                raise ValueError(
+                    """
+                    Ambiguous configuration!!
+                    날짜 지정 방식(start/end)과 기간 지정 방식(period)둘 중 하나만 선택하세요!!
+                    """
                 )
-                results['step1_fetch'] = {
-                    ticker : len(df) for ticker, df in data_dict.items()
-                }
-                logger.info('Step 1 complete')
-            else:
-                logger.info("Skipping Step 1: Fetch")
-                results['step1_fetch'] = None
-            
-            # Step 2
-            if run_step2_save:
-                logger.info("Running Step 2: Save prices")
-                if not data_dict:
-                    logger.warning("No data from step 1, skipping Step 2")
-                    results['step2_save'] = None
-                else:
-                    results['step2_save'] = {}
-                    for ticker, df in data_dict.items():
-                        saved_count = self.db_manager.save_price_data(
-                            ticker_code=ticker,
-                            stock_df=df,
-                            update_if_exists=update_if_exists,
-                        )
-                        results['step2_save'][ticker] = saved_count
-                    logger.info(f"Step 2 Completed")
-            else: 
-                logger.info("Skipping Step 2 : Save")
-                results['step2_save'] = None
-            
-            # Step 3,4
-            if run_step3_4_indicators:
-                logger.info("Running Step 3-4: Calculate and save indicators")
-                results['step3_4_indicators'] = {}
-                for ticker in ticker_list:
-                    try:
-                        saved = self.indicator_pipeline.process_single_ticker(
-                            ticker=ticker,
-                            start_date=start_date,
-                            end_date=end_date,
-                            indicator_list=indicator_list,
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to process {ticker}: {e}")
-                        results['step3_4_indicators'][ticker] = 0
-                logger.info(f"Step 3-4 complete")
-            else: 
-                logger.info("Skipping Step 3-4: Calculate and save indicators")
-                results['step3_4_indicators'] = None
-            
-            return results
-        
+
+            if (start_date is not None and end_date is None) or \
+                (start_date is None and end_date is not None):
+                    raise ValueError(
+                        """
+                        Incomplete date range!!
+                        start_date 와 end_date는 모두 입력되거나 모두 입력되지 않아야 합니다.
+                        """
+                    )
+
+            # ============ Pre-processing: Period를 start_date/end_date로 변환 ============
+            if period:
+                start_date, end_date = self._convert_period_to_dates(period)
+                logger.info(f"Period '{period}' converted to start_date={start_date}, end_date={end_date}")
+
+            # 전체 결과를 저장할 dict
+            all_df_dict = {}
+
+            # 배치로 처리
+            total_tickers = len(ticker_list)
+            num_batches = (total_tickers + batch_size - 1) // batch_size
+            logger.info(f"Processing {total_tickers} tickers in {num_batches} batches of size {batch_size}")
+
+            for i in range(0, total_tickers, batch_size):
+                batch_tickers = ticker_list[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Batch {batch_num}/{num_batches}: Fetching {len(batch_tickers)} tickers")
+                logger.info(f"{'='*60}")
+
+                # Step 1: Fetch batch data
+                try:
+                    batch_df_dict = self.fetcher.fetch_multiple_by_date(
+                        ticker_list=batch_tickers,
+                        start_date=start_date,
+                        end_date=end_date,
+                        interval=interval,
+                        actions=actions,
+                    )
+
+                    logger.info(f"Fetched {len(batch_df_dict)} tickers")
+                    results['step1_fetch'].update({
+                        ticker : len(df) for ticker, df in batch_df_dict.items()
+                    })
+
+                except Exception as e:
+                    logger.error(f"Failed to fetch batch {batch_num}: {e}")
+                    for ticker in batch_tickers:
+                        results['step1_fetch'][ticker] = 0
+                    continue
+
+                # Step 2: Save batch data using bulk save function
+                try:
+                    logger.info(f"Saving batch {batch_num} to database...")
+                    batch_save_results = self.db_manager.save_price_data(
+                        df_dict=batch_df_dict,
+                        update_if_exists=update_if_exists,
+                    )
+                    results['step2_save_price'].update(batch_save_results)
+                    logger.info(f"Batch {batch_num} saved successfully")
+
+                except Exception as e:
+                    logger.error(f"Failed to save batch {batch_num}: {e}")
+                    for ticker in batch_df_dict.keys():
+                        results['step2_save_price'][ticker] = 0
+                    continue
+
+                # 메모리 정리
+                all_df_dict.update(batch_df_dict)
+                del batch_df_dict
+
+            #============Summary=============
+            logger.info("="*60)
+            logger.info("Pipeline Summary")
+            logger.info("="*60)
+
+            total_fetched = sum(results['step1_fetch'].values())
+            total_saved_prices = sum(results['step2_save_price'].values())
+
+            results['summary'] = {
+                'total_fetched_records': total_fetched,
+                'total_saved_prices': total_saved_prices,
+                'tickers_processed': len(ticker_list),
+                'batches_processed': num_batches,
+                'status': 'success'
+            }
+
+            logger.info(f"Total fetched records: {total_fetched}")
+            logger.info(f"Total saved price records: {total_saved_prices}")
+            logger.info(f"✓ Pipeline completed successfully")
+                
+            #결과 출력
+            logger.info(f"\n{'='*60}")
+            logger.info(f"ToTal Results: {results}")
+            logger.info(f"{'='*60}")
+
+            return all_df_dict
+
         except Exception as e:
-            logger.error(f"Step-by-step execution failed: {e}")
+            logger.error(f"Pipeline failed: {e}")
+            results['summary'] = {
+                'status' : 'failed',
+                'error': str(e)
+            }
             raise
-        finally:
-            self.close()
+        
+    def run_indicator_pipeline(
+        self,
+        ticker_list: List[str],
+        indicator_list: List[str],
+        start_date: str,
+        end_date: str,
+        version: Optional[str] = "v1.0",
+        batch_size: int = 100,
+    )-> Dict[str,pd.DataFrame]:
+        """
+        db에서 가격 정보 불러와서 지표 계산 및 db에 지표 저장 (배치 처리)\n
+        **주의**
+            -지표계산에 필요한 과거데이터까지 추가로 db에서 불러오기 때문에 db에 데이터가 존재해야함.
+
+        Args:
+            ticker_list : 종목 리스트
+            indicator_list : 지표 리스트
+            start_date : 시작 날짜
+            end_date : 종료 날짜
+            version : 지표 계산 로직 버전
+            batch_size: 배치 크기
+
+        Returns:
+            {ticker : DataFrame} 딕셔너리
+            DataFrame: OHLCV데이터 + 지표데이터
+        """
+        results = {
+            'step1_load_data' : {},
+            'step2_calculate' : {},
+            'step3_save_indicator' : {},
+            'summary': {},
+        }
+
+        try:
+            # ============ Pre-processing: Lookback 계산 및 적용 (안전 마진 포함) ============
+            original_start_date = start_date  # 원래 요청한 start_date 저장
+            start_date = self._calculate_extended_start_date(start_date, indicator_list)
+
+            # 전체 결과를 저장할 dict
+            all_calculated_dict = {}
+
+            # 배치로 처리
+            total_tickers = len(ticker_list)
+            num_batches = (total_tickers + batch_size - 1) // batch_size
+            logger.info(f"Processing {total_tickers} tickers in {num_batches} batches of size {batch_size}")
+
+            for i in range(0, total_tickers, batch_size):
+                batch_tickers = ticker_list[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Batch {batch_num}/{num_batches}: Processing {len(batch_tickers)} tickers")
+                logger.info(f"{'='*60}")
+
+                # Step 1: Load price data for batch
+                batch_df_dict = {}
+                try:
+                    logger.info(f"Loading price data for batch {batch_num}...")
+                    # 배치 전체를 한번에 로드
+                    batch_price_dict = self.db_manager.load_price_data(
+                        ticker_codes=batch_tickers,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+
+                    for ticker in batch_tickers:
+                        if ticker in batch_price_dict:
+                            df = batch_price_dict[ticker]
+                            if df.empty:
+                                logger.warning(f"No price data for {ticker}")
+                                results['step1_load_data'][ticker] = 0
+                            else:
+                                batch_df_dict[ticker] = df
+                                results['step1_load_data'][ticker] = len(df)
+                                logger.debug(f"Loaded {len(df)} records for {ticker}")
+                        else:
+                            logger.warning(f"No price data for {ticker}")
+                            results['step1_load_data'][ticker] = 0
+
+                    logger.info(f"Loaded {len(batch_df_dict)} tickers for batch {batch_num}")
+
+                except Exception as e:
+                    logger.error(f"Failed to load data for batch {batch_num}: {e}")
+                    for ticker in batch_tickers:
+                        results['step1_load_data'][ticker] = 0
+                    continue
+
+                # Step 2: Calculate indicators for batch
+                batch_calculated_dict = {}
+                try:
+                    logger.info(f"Calculating indicators for batch {batch_num}...")
+                    for ticker, df in batch_df_dict.items():
+                        try:
+                            calculated_df = self.calculator.calculate_indicators(
+                                df=df,
+                                indicator_list=indicator_list
+                            )
+
+                            batch_calculated_dict[ticker] = calculated_df
+                            results['step2_calculate'][ticker] = len(calculated_df)
+                            logger.debug(f"Calculated {len(calculated_df)} records for {ticker}")
+
+                        except Exception as e:
+                            logger.error(f"Failed to calculate indicators for {ticker}: {e}")
+                            results['step2_calculate'][ticker] = 0
+
+                    logger.info(f"Calculated indicators for {len(batch_calculated_dict)} tickers in batch {batch_num}")
+
+                except Exception as e:
+                    logger.error(f"Failed to calculate indicators for batch {batch_num}: {e}")
+                    continue
+
+                # Step 3: Save indicators (original_start_date 기준으로 필터링)
+                try:
+                    logger.info(f"Saving indicators for batch {batch_num} to database...")
+
+                    # original_start_date 이후의 지표 데이터만 필터링
+                    filtered_indicator_dict = {}
+                    for ticker, df in batch_calculated_dict.items():
+                        if 'date' in df.columns or df.index.name == 'date':
+                            # index가 date인 경우
+                            if df.index.name == 'date':
+                                filtered_df = df[df.index >= original_start_date].copy()
+                            # date가 column인 경우
+                            else:
+                                filtered_df = df[df['date'] >= original_start_date].copy()
+                        else:
+                            # date column이 없으면 전체 데이터 사용
+                            filtered_df = df.copy()
+
+                        if not filtered_df.empty:
+                            # NaN 검증: original_start_date 범위에 NaN이 있으면 경고
+                            nan_cols = filtered_df.columns[filtered_df.isna().any()].tolist()
+                            if nan_cols:
+                                logger.warning(
+                                    f"⚠ {ticker}: NaN values found in original date range for columns: {nan_cols}. "
+                                    f"Lookback may be insufficient or DB data incomplete."
+                                )
+
+                            filtered_indicator_dict[ticker] = filtered_df
+
+                    if filtered_indicator_dict:
+                        batch_save_results = self.db_manager.save_indicators(
+                            indicator_data_dict=filtered_indicator_dict,
+                            version=version,
+                        )
+                        results['step3_save_indicator'].update(batch_save_results)
+                        logger.info(f"Batch {batch_num} indicators saved successfully (filtered to original_start_date={original_start_date})")
+
+                except Exception as e:
+                    logger.error(f"Failed to save indicators for batch {batch_num}: {e}")
+                    for ticker in batch_calculated_dict.keys():
+                        results['step3_save_indicator'][ticker] = 0
+                    continue
+
+                # 메모리 정리
+                all_calculated_dict.update(batch_calculated_dict)
+                del batch_df_dict
+                del batch_calculated_dict
+
+            #============Summary=============
+            logger.info("="*60)
+            logger.info("Pipeline Summary")
+            logger.info("="*60)
+
+            total_loaded_price = sum(results['step1_load_data'].values())
+            total_calculated = sum(results['step2_calculate'].values())
+            total_saved_indicators = sum(results['step3_save_indicator'].values())
+
+            results['summary'] = {
+                'total_loaded_price_data' : total_loaded_price,
+                'total_calculated_indicators': total_calculated,
+                'total_saved_indicators' : total_saved_indicators,
+                'tickers_processed': len(ticker_list),
+                'batches_processed': num_batches,
+                'status': 'success'
+            }
+
+            logger.info(f"Total loaded price data: {total_loaded_price}")
+            logger.info(f"Total calculated indicator records: {total_calculated}")
+            logger.info(f"Total saved indicator records: {total_saved_indicators}")
+            logger.info(f"✓ Pipeline completed successfully")
+
+            #결과 출력
+            logger.info(f"\n{'='*60}")
+            logger.info(f"ToTal Results: {results}")
+            logger.info(f"{'='*60}")
+
+            return all_calculated_dict
+
+        except Exception as e:
+            logger.error(f"Pipeline failed: {e}")
+            results['summary'] = {
+                'status' : 'failed',
+                'error': str(e)
+            }
+            raise
             
     def close(self):
         try:
@@ -292,3 +746,127 @@ def run_pipeline(
         end_date=end_date,
         indicator_list=indicator_list,
     )
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
+    print("\n" + "="*70)
+    print("DataPipeline 테스트")
+    print("="*70)
+
+    # [1] DataPipeline 초기화
+    print("\n[1] DataPipeline 초기화...")
+    try:
+        with DataPipeline() as pipeline:
+            print(f"✓ DataPipeline 생성 완료")
+            print(f"  - DB Path: {pipeline.db_path}")
+
+            # [2] _convert_period_to_dates() 정적 메서드 테스트
+            print("\n[2] _convert_period_to_dates() 테스트...")
+            try:
+                test_periods = ["1y", "6m", "3m", "1m", "1w"]
+                for period in test_periods:
+                    start_date, end_date = DataPipeline._convert_period_to_dates(period)
+                    print(f"✓ {period}: {start_date} ~ {end_date}")
+            except Exception as e:
+                print(f"✗ Period 변환 실패: {e}")
+
+            # [3] _calculate_extended_start_date() 테스트
+            print("\n[3] _calculate_extended_start_date() 테스트...")
+            try:
+                test_indicators = [
+                    ['ma_5'],
+                    ['ma_200'],
+                    ['ma_5', 'ma_20', 'ma_200', 'macd']
+                ]
+                base_date = "2024-01-01"
+                for indicators in test_indicators:
+                    extended_date = pipeline._calculate_extended_start_date(base_date, indicators)
+                    print(f"✓ {indicators}: {base_date} → {extended_date}")
+            except Exception as e:
+                print(f"✗ Extended date 계산 실패: {e}")
+
+            # [4] run_price_pipeline() 테스트
+            print("\n[4] run_price_pipeline() 테스트 (가격 데이터 수집/저장)...")
+            try:
+                korean_tickers = [
+                    "005930.KS",  # 삼성전자
+                    "000660.KS",  # SK하이닉스
+                ]
+                results = pipeline.run_price_pipeline(
+                    ticker_list=korean_tickers,
+                    period="2y",
+                    update_if_exists=True,
+                    batch_size=10
+                )
+
+                # run_price_pipeline은 {ticker: DataFrame} 딕셔너리 반환
+                print(f"✓ Price Pipeline 완료:")
+                if isinstance(results, dict) and len(results) > 0:
+                    for ticker, df in results.items():
+                        print(f"  - {ticker}: {len(df)} records returned")
+                else:
+                    print(f"  ⚠ No data returned")
+            except Exception as e:
+                print(f"✗ Price Pipeline 실패: {e}")
+
+            # [5] run_indicator_pipeline() 테스트
+            print("\n[5] run_indicator_pipeline() 테스트 (지표 계산/저장)...")
+            try:
+                korean_tickers = ["005930.KS"]  # 삼성전자
+                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+
+                results = pipeline.run_indicator_pipeline(
+                    ticker_list=korean_tickers,
+                    indicator_list=indicator_list,
+                    start_date="2025-01-01",
+                    end_date="2025-10-01",
+                    version="v1.0",
+                    batch_size=10
+                )
+
+                # run_indicator_pipeline은 {ticker: DataFrame} 딕셔너리 반환
+                print(f"✓ Indicator Pipeline 완료:")
+                if isinstance(results, dict) and len(results) > 0:
+                    for ticker, df in results.items():
+                        print(f"  - {ticker}: {len(df)} records with indicators")
+                else:
+                    print(f"  ⚠ No data returned")
+            except Exception as e:
+                print(f"✗ Indicator Pipeline 실패: {e}")
+
+            # [6] run_full_pipeline() 테스트
+            print("\n[6] run_full_pipeline() 테스트 (전체 파이프라인)...")
+            try:
+                korean_tickers = ["005930.KS"]  # 삼성전자
+                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+
+                results = pipeline.run_full_pipeline(
+                    ticker_list=korean_tickers,
+                    period="1m",
+                    indicator_list=indicator_list,
+                    update_if_exists=True,
+                    version="v1.0",
+                    batch_size=10
+                )
+
+                # run_full_pipeline은 {ticker: DataFrame} 딕셔너리 반환 (with indicators)
+                print(f"✓ Full Pipeline 완료:")
+                if isinstance(results, dict) and len(results) > 0:
+                    for ticker, df in results.items():
+                        print(f"  - {ticker}: {len(df)} records with indicators")
+                        print(f"    Columns: {[col for col in df.columns if col in indicator_list]}")
+                else:
+                    print(f"  ⚠ No data returned")
+            except Exception as e:
+                print(f"✗ Full Pipeline 실패: {e}")
+
+            print(f"\n✓ DataPipeline 정상 종료")
+
+    except Exception as e:
+        print(f"✗ DataPipeline 초기화 실패: {e}")
+
+    print("\n" + "="*70)
+    print("모든 테스트 완료!")
+    print("="*70)
