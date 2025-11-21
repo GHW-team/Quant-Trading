@@ -14,6 +14,10 @@ data:
     - "000660.KS"    # SK하이닉스
     # - "051910.KS"    # LG화학
     # - "207940.KS"    # SM Entertainment
+  exchanges:
+  #상장 인덱스
+  # - "KOSPI"
+  # - "S&P500"
 
   # 기간 설정 (period 또는 start_date/end_date 중 하나)
   period: "1y"                          # 예: "1y", "6m", "3m"
