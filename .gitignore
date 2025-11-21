@@ -216,15 +216,12 @@ __pycache__/
 dist/
 build/
 
-# 가상환경
 venv/
 .venv/
 env/
 
-# 환경 변수 (민감 정보)
 .env
 
-# 데이터 파일 (용량 큰 파일)
 data/database/*.db
 data/raw/*.csv
 *.parquet
@@ -242,13 +239,14 @@ data/raw/*.csv
 .DS_Store
 Thumbs.db
 
-# 로그
+# Logs
 *.log
 
-# Docker (이미지는 제외)
-# docker-compose.override.yml은 개인 설정용
+# Docker (override local config)
 docker-compose.override.yml
 
-
-#클로드 개인설정
+# Local personal settings
 .claude/
+
+# Local output artifacts (large generated files)
+data/output/
