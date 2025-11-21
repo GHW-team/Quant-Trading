@@ -252,3 +252,4 @@ docker-compose.override.yml
 
 #í´ë¡œë“œ ê°œì¸ì„¤ì •
 .claude/data/output/
+"data/output/*.csv"    # ÀÌ¹Ì ÀÖÀ¸¸é °Ç³Ê¶Ü
