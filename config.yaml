@@ -10,19 +10,19 @@ data:
   # 종목 리스트 (기본값)
   tickers:
     # 한국 대형주 예시
-    - "005930.KS"    # 삼성전자
-    - "000660.KS"    # SK하이닉스
+    #- "005930.KS"    # 삼성전자
+    #- "000660.KS"    # SK하이닉스
     # - "051910.KS"    # LG화학
     # - "207940.KS"    # SM Entertainment
   exchanges:
-  #상장 인덱스
-  # - "KOSPI"
+    #상장 인덱스
+    - "KOSPI"
   # - "S&P500"
 
   # 기간 설정 (period 또는 start_date/end_date 중 하나)
-  period: "1y"                          # 예: "1y", "6m", "3m"
-  # start_date: "2024-01-01"            # 대신 날짜 범위로 지정
-  # end_date: "2024-12-31"
+  period:                          # 예: "1y", "6m", "3m"
+  start_date: "2017-01-01"            # 대신 날짜 범위로 지정
+  end_date: "2022-12-31"
 
   # 데이터 업데이트 설정
   update_if_exists: true
@@ -33,9 +33,14 @@ indicators:
   # 계산할 지표 목록
   list:
     - "ma_5"        # 5일 EMA
+    - "ma_10"
     - "ma_20"       # 20일 EMA
+    - "ma_50"
+    - "ma_60"
+    - "ma_120"
     - "ma_200"      # 200일 EMA
     - "macd"        # MACD
+    - "macd_hist"   # MACD histogram (모델 피처)
 
   # 지표 계산 버전
   version: "v1.0"
@@ -51,8 +56,9 @@ batch:
 
 # 4. 데이터 가져오기 설정 (Fetcher)
 fetcher:
-  max_workers: 5          # 병렬 처리 스레드 수
+  max_workers: 3         # 병렬 처리 스레드 수
   max_retries: 3          # 재시도 횟수
+  request_delay: 1.3      # 요청 간 지연(초) - too many requests 완화
 
 # 5. 로깅 설정
 logging:
