@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from typing import Optional,List
+from typing import Optional,List,Dict
 from sqlalchemy import create_engine,select,and_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -67,7 +67,7 @@ class DatabaseManager():
             
         return 'UNKNOWN'
 
-    def get_ticker_id(
+    def _get_ticker_id(
         self,
         ticker_code: str,
         market: Optional[str] = None,
@@ -135,123 +135,154 @@ class DatabaseManager():
 
     def save_price_data(
         self,
-        ticker_code,
-        stock_df: pd.DataFrame,
+        df_dict: Dict[str, pd.DataFrame],
         update_if_exists: bool,
-    )-> int:
+    ) -> Dict[str,int]:
         """
-        가격 데이터 대량 저장 (SQLAlchemy Core 사용)
-        
+        여러 티커의 가격 데이터를 하나의 트랜잭션으로 db에 저장
+
         Args:
-            ticker_code: 종목 코드
-            df: yfinance에서 가져온 DataFrame (index=Date)
+            df_dict: {ticker_code: DataFrame} 딕셔너리
             update_if_exists: True면 UPSERT, False면 INSERT OR IGNORE
-            
+
         Returns:
-            저장된 행 수
+            {ticker_code: saved_count} 딕셔너리
         """
-        ticker_id = self.get_ticker_id(ticker_code)
+        results = {}
 
-        #stock_preprocess
-        df_reset = stock_df.reset_index()
+        # 먼저 모든 ticker_id를 미리 조회/생성 (트랜잭션 밖에서)
+        ticker_ids = {}
+        for ticker_code in df_dict.keys():
+            try:
+                ticker_ids[ticker_code] = self._get_ticker_id(ticker_code)
+            except Exception as e:
+                logger.error(f"✗ Failed to get ticker_id for {ticker_code}: {e}")
+                results[ticker_code] = 0
 
-        df_reset.columns = df_reset.columns.str.strip()
-        df_reset.columns = df_reset.columns.str.lower()
-        df_reset.columns = df_reset.columns.str.replace(' ','_')
-
-        #select columns
-        df_save = df_reset[['date','open','high','low','close','volume','adj_close']].copy()
-        df_save['ticker_id'] = ticker_id
-
-        #convert to records
-        records = df_save.to_dict(orient='records')
-
-        #make statement
-        if update_if_exists:
-            stmt = sqlite_insert(DailyPrice.__table__).values(records)
-            stmt = stmt.on_conflict_do_update(
-                index_elements= ['ticker_id', 'date'],
-                set_=dict(
-                    open = stmt.excluded.open,
-                    high = stmt.excluded.high,
-                    low = stmt.excluded.low,
-                    close = stmt.excluded.close,
-                    volume = stmt.excluded.volume,
-                    adj_close = stmt.excluded.adj_close,
-                )
-            )
-        else:
-            stmt = sqlite_insert(DailyPrice.__table__).values(records)
-            stmt = stmt.on_conflict_do_nothing(
-                index_elements=['ticker_id','date'],
-            )
-        
-        #excute statement
+        # 하나의 트랜잭션으로 모든 티커의 가격 데이터 저장
         with self.engine.begin() as conn:
-            result = conn.execute(stmt)
-        logger.info(f"Saved {len(records)} price records for {ticker_code}")
+            for ticker_code, stock_df in df_dict.items():
+                try:
+                    # 이미 조회한 ticker_id 사용
+                    if ticker_code not in ticker_ids:
+                        continue
 
-        return len(records)
+                    # 필요한 열만 선택
+                    logger.debug(f"Columns in stock_df for {ticker_code}: {list(stock_df.columns)}")
+                    logger.debug(f"stock_df shape: {stock_df.shape}")
+                    logger.debug(f"stock_df index name: {stock_df.index.name}")
+
+                    df_save = stock_df[['date','open','high','low','close','volume','adj_close']].copy()
+                    df_save['ticker_id'] = ticker_ids[ticker_code]
+
+                    # 레코드로 변환
+                    records = df_save.to_dict(orient='records')
+
+                    # SQL 문 생성
+                    if update_if_exists:
+                        stmt = sqlite_insert(DailyPrice.__table__).values(records)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['ticker_id', 'date'],
+                            set_=dict(
+                                open=stmt.excluded.open,
+                                high=stmt.excluded.high,
+                                low=stmt.excluded.low,
+                                close=stmt.excluded.close,
+                                volume=stmt.excluded.volume,
+                                adj_close=stmt.excluded.adj_close,
+                            )
+                        )
+                    else:
+                        stmt = sqlite_insert(DailyPrice.__table__).values(records)
+                        stmt = stmt.on_conflict_do_nothing(
+                            index_elements=['ticker_id', 'date']
+                        )
+
+                    # 같은 트랜잭션 안에서 실행
+                    conn.execute(stmt)
+                    results[ticker_code] = len(records)
+                    logger.debug(f"✓ Bulk saved {len(records)} price records for {ticker_code}")
+
+                except Exception as e:
+                    logger.error(f"✗ Failed to save price data for {ticker_code}: {e}")
+                    results[ticker_code] = 0
+
+        logger.info(f"Bulk price save completed for {len(results)} tickers in single transaction")
+        return results
     
     def save_indicators(
         self,
-        ticker_code: str,
-        df: pd.DataFrame,
+        indicator_data_dict: Dict[str, pd.DataFrame],
         version: str = "v1.0",
-    ):
+    ) -> Dict[str,int]:
         """
-        지표 데이터 대량 저장
-        
+        여러 티커의 지표 데이터를 하나의 트랜잭션으로 db에 저장
+
         Args:
-            ticker_code: 종목 코드
-            df: 지표가 포함된 DataFrame (index=date)
+            indicator_data_dict: {ticker_code: DataFrame} 딕셔너리
             version: 계산 버전
-            
+
         Returns:
-            저장된 행 수
+            {ticker_code: saved_count} 딕셔너리
         """
-        #loading ticker_id 
-        ticker_id = self.get_ticker_id(ticker_code)
+        results = {}
 
-        #preprocess dataframe
-        df_reset = df.reset_index()
-        
-        df_reset.columns = df_reset.columns.str.strip()
-        df_reset.columns = df_reset.columns.str.lower()
-        df_reset.columns = df_reset.columns.str.replace(' ','_')
-        
-        #select indicators
-        indicators = [
-            'ma_5','ma_20','ma_200','macd',
-        ]
-        available_indicators = [ind for ind in indicators if ind in df_reset.columns]
+        # 지표 목록 정의
+        indicators = ['ma_5', 'ma_20', 'ma_200', 'macd']
 
-        df_save = df_reset[available_indicators + ['date']].copy()
-        df_save['ticker_id'] = ticker_id
-        df_save['calculated_version'] = version 
+        # 먼저 모든 ticker_id를 미리 조회/생성 (트랜잭션 밖에서)
+        ticker_ids = {}
+        for ticker_code in indicator_data_dict.keys():
+            try:
+                ticker_ids[ticker_code] = self._get_ticker_id(ticker_code)
+            except Exception as e:
+                logger.error(f"✗ Failed to get ticker_id for {ticker_code}: {e}")
+                results[ticker_code] = 0
 
-        #fill NaN -> None
-        df_save = df_save.replace({np.nan : None})
-
-        #convert to dictionary list
-        records = df_save.to_dict(orient='records')
-
-        #make statement
-        stmt = sqlite_insert(TechnicalIndicator.__table__).values(records)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=['ticker_id','date'],
-            set_={
-                ind : stmt.excluded[ind] for ind in available_indicators
-            }
-        )
-        
-        #execute stmt
+        # 하나의 트랜잭션으로 모든 티커의 지표 데이터 저장
         with self.engine.begin() as conn:
-            result = conn.execute(stmt)
-        logger.info(f"Saved {len(records)} indicator records for {ticker_code}")
+            for ticker_code, df in indicator_data_dict.items():
+                try:
+                    # 이미 조회한 ticker_id 사용
+                    if ticker_code not in ticker_ids:
+                        continue
 
-        return len(records)
-    
+                    ticker_id = ticker_ids[ticker_code]
+
+                    # 사용 가능한 지표 선택
+                    available_indicators = [ind for ind in indicators if ind in df.columns]
+
+                    df_save = df[available_indicators + ['date']].copy()
+                    df_save['ticker_id'] = ticker_id
+                    df_save['calculated_version'] = version
+
+                    # NaN을 None으로 변환
+                    df_save = df_save.replace({np.nan: None})
+
+                    # 레코드로 변환
+                    records = df_save.to_dict(orient='records')
+
+                    # SQL 문 생성
+                    stmt = sqlite_insert(TechnicalIndicator.__table__).values(records)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['ticker_id', 'date'],
+                        set_={
+                            ind: stmt.excluded[ind] for ind in available_indicators
+                        }
+                    )
+
+                    # 같은 트랜잭션 안에서 실행
+                    conn.execute(stmt)
+                    results[ticker_code] = len(records)
+                    logger.debug(f"✓ Bulk saved {len(records)} indicator records for {ticker_code}")
+
+                except Exception as e:
+                    logger.error(f"✗ Failed to save indicators for {ticker_code}: {e}")
+                    results[ticker_code] = 0
+
+        logger.info(f"Bulk indicator save completed for {len(results)} tickers in single transaction")
+        return results
+
     def load_ticker_metadata(
         self,
         ticker_codes: Optional[List[str]] = None,
@@ -273,72 +304,121 @@ class DatabaseManager():
         return df
 
     def load_price_data(
-            self,
-            ticker_code: str,
-            start_date: Optional[str] = None,
-            end_date: Optional[str] = None,
-    ):
-        stmt = select(
-            DailyPrice.date,
-            DailyPrice.open,
-            DailyPrice.high,
-            DailyPrice.low,
-            DailyPrice.close,
-            DailyPrice.volume,
-            DailyPrice.adj_close,
-        ).join(
-            Ticker, Ticker.ticker_id == DailyPrice.ticker_id   
-        ).where(
-            Ticker.ticker_code == ticker_code
-        )
+        self,
+        ticker_codes: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        여러 티커의 가격 데이터를 일괄로 불러옵니다.
 
-        if start_date:
-            stmt = stmt.where(DailyPrice.date >= start_date)
+        Args:
+            ticker_codes: 티커 코드 리스트
+            start_date: 시작 날짜 (YYYY-MM-DD)
+            end_date: 종료 날짜 (YYYY-MM-DD)
 
-        if end_date:
-            stmt = stmt.where(DailyPrice.date <= end_date)
+        Returns:
+            {ticker_code: DataFrame} 딕셔너리
+        """
+        df_dict = {}
 
-        stmt = stmt.order_by(DailyPrice.date)
-        
-        df = pd.read_sql(stmt,self.engine,parse_dates=['date'])
-        if not df.empty:
-            df.set_index('date',inplace=True)
+        for ticker_code in ticker_codes:
+            try:
+                stmt = select(
+                    DailyPrice.date,
+                    DailyPrice.open,
+                    DailyPrice.high,
+                    DailyPrice.low,
+                    DailyPrice.close,
+                    DailyPrice.volume,
+                    DailyPrice.adj_close,
+                ).join(
+                    Ticker, Ticker.ticker_id == DailyPrice.ticker_id
+                ).where(
+                    Ticker.ticker_code == ticker_code
+                )
 
-        return df
+                if start_date:
+                    stmt = stmt.where(DailyPrice.date >= start_date)
+
+                if end_date:
+                    stmt = stmt.where(DailyPrice.date <= end_date)
+
+                stmt = stmt.order_by(DailyPrice.date)
+
+                df = pd.read_sql(stmt, self.engine, parse_dates=['date'])
+                # date를 column으로 유지 (index로 설정하지 않음)
+                # fetch된 데이터 형식과 통일: date column, lowercase 컬럼명
+                if not df.empty:
+                    df.columns = df.columns.str.strip().str.lower()
+
+                df_dict[ticker_code] = df
+                logger.debug(f"✓ Loaded {len(df)} price records for {ticker_code}")
+
+            except Exception as e:
+                logger.error(f"✗ Failed to load price data for {ticker_code}: {e}")
+                raise
+
+        logger.info(f"Bulk price load completed for {len(ticker_codes)} tickers")
+        return df_dict
 
     def load_indicators(
-            self,
-            ticker_code: str,
-            start_date: Optional[str] = None,
-            end_date: Optional[str] = None,
-    ):
-        #Make Query
-        stmt = select(
-            TechnicalIndicator.date,
-            TechnicalIndicator.ma_5,
-            TechnicalIndicator.ma_20,
-            TechnicalIndicator.ma_200,
-            TechnicalIndicator.macd,
-        ).join(
-            Ticker, Ticker.ticker_id == TechnicalIndicator.ticker_id
-        ).where(
-            Ticker.ticker_code == ticker_code
-        )
-        
-        if start_date:
-            stmt = stmt.where(TechnicalIndicator.date >= start_date)
+        self,
+        ticker_codes: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        여러 티커의 기술적 지표를 일괄로 불러옵니다.
 
-        if end_date:
-            stmt = stmt.where(TechnicalIndicator.date <= end_date)
-        
-        stmt = stmt.order_by(TechnicalIndicator.date)
+        Args:
+            ticker_codes: 티커 코드 리스트
+            start_date: 시작 날짜 (YYYY-MM-DD)
+            end_date: 종료 날짜 (YYYY-MM-DD)
 
-        df = pd.read_sql(stmt, self.engine, parse_dates=['date'])
-        if not df.empty:
-            df.set_index('date',inplace=True)
+        Returns:
+            {ticker_code: DataFrame} 딕셔너리
+        """
+        df_dict = {}
 
-        return df
-    
+        for ticker_code in ticker_codes:
+            try:
+                stmt = select(
+                    TechnicalIndicator.date,
+                    TechnicalIndicator.ma_5,
+                    TechnicalIndicator.ma_20,
+                    TechnicalIndicator.ma_200,
+                    TechnicalIndicator.macd,
+                ).join(
+                    Ticker, Ticker.ticker_id == TechnicalIndicator.ticker_id
+                ).where(
+                    Ticker.ticker_code == ticker_code
+                )
+
+                if start_date:
+                    stmt = stmt.where(TechnicalIndicator.date >= start_date)
+
+                if end_date:
+                    stmt = stmt.where(TechnicalIndicator.date <= end_date)
+
+                stmt = stmt.order_by(TechnicalIndicator.date)
+
+                df = pd.read_sql(stmt, self.engine, parse_dates=['date'])
+                # date를 column으로 유지 (index로 설정하지 않음)
+                # 통일된 데이터 형식: date column, lowercase 컬럼명
+                if not df.empty:
+                    df.columns = df.columns.str.strip().str.lower()
+
+                df_dict[ticker_code] = df
+                logger.debug(f"✓ Loaded {len(df)} indicator records for {ticker_code}")
+
+            except Exception as e:
+                logger.error(f"✗ Failed to load indicators for {ticker_code}: {e}")
+                raise
+
+        logger.info(f"Bulk indicator load completed for {len(ticker_codes)} tickers")
+        return df_dict
+
     def close(self):
         self.session.close()
         self.engine.dispose()
@@ -351,16 +431,127 @@ class DatabaseManager():
         self.close()
 
 if __name__ == '__main__':
-    fetcher = StockDataFetcher()
+    print("\n" + "="*70)
+    print("DatabaseManager 함수 테스트")
+    print("="*70)
 
+    # 1. 테스트 데이터 준비
+    print("\n[1] 테스트 데이터 다운로드...")
+    fetcher = StockDataFetcher()
     korean_stocks = [
         "005930.KS",  # 삼성전자
         "000660.KS",  # SK하이닉스
-        "035720.KS",  # 카카오
-        "035420.KS",  # NAVER
-    ]    
+    ]
 
-    data_dict = fetcher.fetch_multiple_stocks(korean_stocks)
+    data_dict = fetcher.fetch_multiple_by_period(
+        ticker_list=korean_stocks,
+        period="1y"
+    )
+    print(f"✓ {len(data_dict)} 개 티커 데이터 준비 완료")
+
     with DatabaseManager() as db_manager:
-        for ticker, df in data_dict.items():
-            db_manager.save_price_data(ticker_code=ticker, stock_df=df, update_if_exists=True)
+        # 2. _infer_market_from_ticker() 테스트
+        print("\n[2] _infer_market_from_ticker() 테스트...")
+        try:
+            for ticker in korean_stocks:
+                market = db_manager._infer_market_from_ticker(ticker)
+                print(f"✓ {ticker} → market: {market}")
+        except Exception as e:
+            print(f"✗ 시장 추론 실패: {e}")
+
+        # 3. save_price_data() 테스트
+        print("\n[3] save_price_data() 테스트 (여러 티커 저장)...")
+        try:
+            save_results = db_manager.save_price_data(
+                df_dict=data_dict,
+                update_if_exists=True
+            )
+            print(f"✓ 가격 데이터 저장 완료: {save_results}")
+        except Exception as e:
+            print(f"✗ 가격 데이터 저장 실패: {e}")
+
+        # 4. _get_ticker_id() 테스트
+        print("\n[4] _get_ticker_id() 테스트...")
+        try:
+            for ticker in korean_stocks:
+                ticker_id = db_manager._get_ticker_id(ticker)
+                print(f"✓ {ticker} → ticker_id: {ticker_id}")
+        except Exception as e:
+            print(f"✗ 티커 ID 조회 실패: {e}")
+
+        # 5. load_ticker_metadata() 테스트
+        print("\n[5] load_ticker_metadata() 테스트...")
+        try:
+            metadata = db_manager.load_ticker_metadata(ticker_codes=korean_stocks)
+            print(f"✓ 티커 메타데이터 로드:")
+            print(metadata)
+        except Exception as e:
+            print(f"✗ 메타데이터 로드 실패: {e}")
+
+        # 6. save_ticker_metadata() 테스트
+        print("\n[6] save_ticker_metadata() 테스트...")
+        try:
+            metadata_info = {
+                'name': '삼성전자',
+                'sector': 'IT'
+            }
+            db_manager.save_ticker_metadata(
+                ticker_code=korean_stocks[0],
+                metadata=metadata_info
+            )
+            print(f"✓ {korean_stocks[0]} 메타데이터 저장 완료")
+        except Exception as e:
+            print(f"✗ 메타데이터 저장 실패: {e}")
+
+        # 7. load_price_data() 테스트 (여러 티커 로드)
+        print("\n[7] load_price_data() 테스트 (여러 티커 로드)...")
+        try:
+            df_price_dict = db_manager.load_price_data(
+                ticker_codes=korean_stocks,
+                start_date="2024-01-01"
+            )
+            for ticker, df in df_price_dict.items():
+                print(f"✓ {ticker}: {len(df)} 행")
+                print(f"  컬럼: {list(df.columns)}")
+        except Exception as e:
+            print(f"✗ 가격 데이터 로드 실패: {e}")
+
+        # 8. save_indicators() 테스트
+        print("\n[8] save_indicators() 테스트 (여러 티커 지표 저장)...")
+        try:
+            from src.data.indicator_calculator import IndicatorCalculator
+
+            indicator_data = {}
+            calculator = IndicatorCalculator()
+
+            for ticker, df_price in df_price_dict.items():
+                df_with_indicators = calculator.calculate_indicators(
+                    df=df_price,
+                    indicator_list=['ma_5', 'ma_20', 'ma_200', 'macd']
+                )
+                indicator_data[ticker] = df_with_indicators
+
+            indicator_results = db_manager.save_indicators(
+                indicator_data_dict=indicator_data,
+                version="v1.0"
+            )
+            print(f"✓ 지표 데이터 저장 완료: {indicator_results}")
+        except Exception as e:
+            print(f"✗ 지표 데이터 저장 실패: {e}")
+
+        # 9. load_indicators() 테스트 (여러 티커 로드)
+        print("\n[9] load_indicators() 테스트 (여러 티커 로드)...")
+        try:
+            df_indicators_dict = db_manager.load_indicators(
+                ticker_codes=korean_stocks,
+                start_date="2024-01-01"
+            )
+            for ticker, df in df_indicators_dict.items():
+                print(f"✓ {ticker}: {len(df)} 행")
+                print(f"  컬럼: {list(df.columns)}")
+        except Exception as e:
+            print(f"✗ 지표 데이터 로드 실패: {e}")
+
+    print("\n" + "="*70)
+    print("모든 테스트 완료!")
+    print("="*70)
