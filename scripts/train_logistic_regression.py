@@ -22,11 +22,11 @@ def load_price_and_features(db_path: pathlib.Path) -> pd.DataFrame:
     return df
 
 def add_abs_momentum_label(df: pd.DataFrame, horizon, threshold) -> pd.DataFrame:
-    df = df.sort_values(["ticker", "date"]).copy()
+    # df = df.sort_values(["ticker", "date"]).copy()    # 정렬 안되어 있으면 하면 됨
 
     def _per_ticker(group: pd.DataFrame) -> pd.DataFrame:
         close = group["close"]
-        fwd_close = close.shift(-horizon)
+        fwd_close = close.shift(-horizon)   # 5칸 앞으로 맨 뒤 5행은 NaN
         fwd_ret = fwd_close / close - 1.0
         group["fwd_ret"] = fwd_ret
         group["label"] = (fwd_ret > threshold).astype("Int64")
@@ -63,8 +63,8 @@ def train_logreg_abs_mom(db_path: pathlib.Path, horizon, threshold):
         "ma_200",
     ]
     df = df.dropna(subset=feature_cols + ["fwd_ret", "label"]).reset_index(drop=True)
-    X = df[feature_cols].values
-    y = df["label"].astype(int).values
+    X = df[feature_cols].values         # (샘플 개수, 8(피처개수)) matrix
+    y = df["label"].astype(int).values  # (샘플 개수) vector
 
     # 4) 시간 기준 train/test split (앞 80% train, 뒤 20% test)
     n = len(df)
@@ -72,31 +72,33 @@ def train_logreg_abs_mom(db_path: pathlib.Path, horizon, threshold):
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
 
-    # 5) 스케일러 + 로지스틱 회귀 파이프라인
-    model = Pipeline(
-        steps=[
-            ("scaler", StandardScaler()),
-            (
-                "logreg",
-                LogisticRegression(
-                    max_iter=1000,
-                    C=1.0,
-                    solver="lbfgs",
-                ),
-            ),
-        ]
-    )
+    # 5) 스케일러 + 로지스틱 회귀
+    scaler = StandardScaler()   # data 표준화
+    X_train_scaled = scaler.fit_transform(X_train)  # fit + transform
+    X_test_scaled = scaler.transform(X_test)
+    
+    logreg = LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs")   # solver="lbfgs" -> 경사하강법보다 좋대요
+    # logreg = SGDClassifier(
+    #             loss="log_loss",      # 로지스틱 회귀 (logistic loss)
+    #             penalty="l2",         # L2 규제 (LogisticRegression이랑 비슷)
+    #             alpha=0.0001,         # 규제 강도 (C의 역수 느낌)
+    #             learning_rate="optimal",  # 러닝레이트 스케줄
+    #             eta0=0.01,            # 초기 learning rate
+    #             max_iter=1000,        # 에폭 수
+    #             tol=1e-3,             # 수렴 기준
+    #             random_state=42,
+    #         ) -> 확률적 경사하강법(SGD)
 
-    model.fit(X_train, y_train)
-
+    logreg.fit(X_train_scaled, y_train)
+    
     # 6) 평가
-    y_pred = model.predict(X_test)
+    y_pred = logreg.predict(X_test_scaled)
     print("=== Classification Report (Absolute Momentum, Logistic Regression) ===")
     print(classification_report(y_test, y_pred, digits=3))
 
-    return model, df, feature_cols
+    return logreg, df, feature_cols
 
-def export_labels_to_csv(df_used: pd.DataFrame, horizon, threshold) -> pathlib.Path:
+def export_labels_to_csv(df_used: pd.DataFrame, horizon, threshold):
     root = pathlib.Path(__file__).resolve().parents[1]
     csv_path = root / "data" / "logistic_regression_labels.csv"
 
@@ -107,29 +109,12 @@ def export_labels_to_csv(df_used: pd.DataFrame, horizon, threshold) -> pathlib.P
     print("라벨 CSV 저장 완료:", csv_path)
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--horizon",
-        type=int,
-        default=5,
-        help="절대 모멘텀 기간(일 수). 예: 5 → 5일 후 수익률 기준",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.0,
-        help="수익률 기준. 예: 0.0 → 0% 초과면 1로 라벨링",
-    )
-    args = parser.parse_args()
-
     db_path = get_db_path()
     cfg = get_config()
     root = pathlib.Path(__file__).resolve().parents[1]
 
-    print(f"Horizon: {args.horizon}일, Threshold: {args.threshold:.2%}")
-
-    model, df_used, feature_cols = train_logreg_abs_mom(db_path=db_path, horizon=args.horizon, threshold=args.threshold)
-    export_labels_to_csv(df_used, horizon=args.horizon, threshold=args.threshold)
-
+    logreg, df_used, feature_cols = train_logreg_abs_mom(db_path=db_path, horizon=20, threshold=0.05)
+    export_labels_to_csv(df_used, horizon=20, threshold=0.05)
+    
 if __name__ == "__main__":
     main()
