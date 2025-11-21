@@ -216,15 +216,15 @@ __pycache__/
 dist/
 build/
 
-# 媛긽솚寃
+# 가상환경
 venv/
 .venv/
 env/
 
-# 솚寃 蹂닔 (誘쇨컧 젙蹂)
+# 환경 변수 (민감 정보)
 .env
 
-# 뜲씠꽣 뙆씪 (슜웾 겙 뙆씪)
+# 데이터 파일 (용량 큰 파일)
 data/database/*.db
 data/raw/*.csv
 *.parquet
@@ -242,17 +242,13 @@ data/raw/*.csv
 .DS_Store
 Thumbs.db
 
-# 濡쒓렇
+# 로그
 *.log
 
-# Docker (씠誘몄뒗 젣쇅)
-# docker-compose.override.yml 媛쒖씤 꽕젙슜
+# Docker (이미지는 제외)
+# docker-compose.override.yml은 개인 설정용
 docker-compose.override.yml
 
 
-#겢濡쒕뱶 媛쒖씤꽕젙
-
-# ?? ?? ??
-.claude/
-
-data/output/
+#클로드 개인설정
+.claude/data/output/
