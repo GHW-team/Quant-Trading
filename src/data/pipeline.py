@@ -789,7 +789,7 @@ if __name__ == "__main__":
                 test_indicators = [
                     ['ma_5'],
                     ['ma_200'],
-                    ['ma_5', 'ma_20', 'ma_200', 'macd']
+                    ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
                 ]
                 base_date = "2024-01-01"
                 for indicators in test_indicators:
@@ -826,7 +826,7 @@ if __name__ == "__main__":
             print("\n[5] run_indicator_pipeline() 테스트 (지표 계산/저장)...")
             try:
                 korean_tickers = ["005930.KS"]  # 삼성전자
-                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+                indicator_list = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
 
                 results = pipeline.run_indicator_pipeline(
                     ticker_list=korean_tickers,
@@ -851,7 +851,7 @@ if __name__ == "__main__":
             print("\n[6] run_full_pipeline() 테스트 (전체 파이프라인)...")
             try:
                 korean_tickers = ["005930.KS"]  # 삼성전자
-                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+                indicator_list = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
 
                 results = pipeline.run_full_pipeline(
                     ticker_list=korean_tickers,

@@ -26,7 +26,11 @@ class IndicatorCalculator:
 
     INDICATORS_FUNCTIONS = {
         'ma_5' : lambda df : IndicatorCalculator._calc_ema(df,5),
+        'ma_10' : lambda df : IndicatorCalculator._calc_ema(df,10),
         'ma_20' : lambda df : IndicatorCalculator._calc_ema(df,20),
+        'ma_50' : lambda df : IndicatorCalculator._calc_ema(df,50),
+        'ma_60' : lambda df : IndicatorCalculator._calc_ema(df,60),
+        'ma_120' : lambda df : IndicatorCalculator._calc_ema(df,120),
         'ma_200' : lambda df : IndicatorCalculator._calc_ema(df,200),
         'macd' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,0],
         'macd_signal' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,1],
@@ -42,7 +46,7 @@ class IndicatorCalculator:
         지표별 필요한 과거 기간(lookback)을 계산합니다.
 
         Args:
-            indicator_list: 지표 리스트 (예: ['ma_5', 'ma_20', 'ma_200'])
+            indicator_list: 지표 리스트 (예: ['ma_5', 'ma_20', 'ma_60', 'ma_200'])
 
         Returns:
             필요한 최대 과거 기간 (일수)
@@ -53,7 +57,11 @@ class IndicatorCalculator:
         # 지표별 필요한 과거 기간
         lookback_map = {
             'ma_5': 5,
+            'ma_10': 10,
             'ma_20': 20,
+            'ma_50': 50,
+            'ma_60': 60,
+            'ma_120': 120,
             'ma_200': 200,
             'macd': 26,              # slow period
             'macd_signal': 26,
@@ -227,7 +235,7 @@ if __name__ == "__main__":
     # [3] validate_indicators() 테스트 - 정상 케이스
     print("\n[3] validate_indicators() 테스트 (정상)...")
     try:
-        valid_indicators = ['ma_5', 'ma_20', 'ma_200', 'macd']
+        valid_indicators = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
         IndicatorCalculator.validate_indicators(valid_indicators)
         print(f"✓ 유효한 지표 검증 통과: {valid_indicators}")
     except Exception as e:
@@ -248,8 +256,8 @@ if __name__ == "__main__":
         test_cases = [
             ['ma_5'],
             ['ma_200'],
-            ['ma_5', 'ma_20'],
-            ['ma_5', 'ma_20', 'ma_200', 'macd'],
+            ['ma_5', 'ma_60'],
+            ['ma_5', 'ma_20', 'ma_50', 'ma_120', 'macd'],
             None,  # 모든 지표
         ]
         for indicators in test_cases:
@@ -289,7 +297,7 @@ if __name__ == "__main__":
     # [7] calculate_indicators() 테스트 - 정상 케이스
     print("\n[7] calculate_indicators() 테스트 (정상)...")
     try:
-        indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+        indicator_list = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
         calculated_df = calculator.calculate_indicators(
             stock_df.copy(),
             indicator_list=indicator_list
@@ -308,7 +316,7 @@ if __name__ == "__main__":
     # [8] calculate_indicators() 테스트 - 부분 지표
     print("\n[8] calculate_indicators() 테스트 (부분 지표)...")
     try:
-        partial_indicators = ['ma_5', 'macd']
+        partial_indicators = ['ma_5', 'ma_60', 'macd']
         calculated_df2 = calculator.calculate_indicators(
             stock_df.copy(),
             indicator_list=partial_indicators

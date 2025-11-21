@@ -146,7 +146,16 @@ class DatabaseManager:
         version: str = "v1.0",
     ) -> Dict[str, int]:
         results: Dict[str, int] = {}
-        indicators = ["ma_5", "ma_20", "ma_200", "macd"]
+        indicators = [
+            "ma_5",
+            "ma_10",
+            "ma_20",
+            "ma_50",
+            "ma_60",
+            "ma_120",
+            "ma_200",
+            "macd",
+        ]
 
         ticker_ids: Dict[str, int] = {}
         for ticker_code in indicator_data_dict.keys():
