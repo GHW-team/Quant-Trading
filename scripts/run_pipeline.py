@@ -100,24 +100,32 @@ class ConfigLoader:
         # CLI에서 제공된 값만 덮어쓰기
         if cli_args.tickers:
             config["tickers"] = cli_args.tickers
+            self.logger.debug("Override from CLI: tickers = %s", config["tickers"])
         if cli_args.exchanges:
             config["exchanges"] = cli_args.exchanges
+            self.logger.debug("Override from CLI: exchanges = %s", config["exchanges"])
 
         if cli_args.period:
             config["period"] = cli_args.period
             config["start_date"] = None
             config["end_date"] = None
+            self.logger.debug("Override from CLI: period = %s", config["period"])
         if cli_args.start_date:
             config["start_date"] = cli_args.start_date
             config["period"] = None
+            self.logger.debug("Override from CLI: start_date = %s", config["start_date"])
         if cli_args.end_date:
             config["end_date"] = cli_args.end_date
+            self.logger.debug("Override from CLI: end_date = %s", config["end_date"])
         if cli_args.indicators:
             config["indicators"] = cli_args.indicators
+            self.logger.debug("Override from CLI: indicators = %s", config["indicators"])
         if cli_args.batch_size:
             config["batch_size"] = cli_args.batch_size
+            self.logger.debug("Override from CLI: batch_size = %s", config["batch_size"])
         if cli_args.update_if_exists is not None:
             config["update_if_exists"] = cli_args.update_if_exists
+            self.logger.debug("Override from CLI: update_if_exists = %s", config["update_if_exists"])
 
         return config
 
@@ -126,11 +134,15 @@ class ConfigLoader:
 # 파이프라인 실행 함수
 # ============================================
 def _resolve_tickers(config: Dict[str, Any]) -> Any:
-    """tickers 비어 있을 때 exchanges 기반으로 TickerUniverse에서 채움"""
+    """tickers와 exchanges 설정을 해석하고 상충 시 에러를 낸다."""
     tickers = config.get("tickers") or []
+    exchanges = config.get("exchanges") or []
+
+    if tickers and exchanges:
+        raise ValueError("tickers와 exchanges를 동시에 지정할 수 없습니다. 하나만 선택하세요.")
+
     if tickers:
         return tickers
-    exchanges = config.get("exchanges") or []
     if exchanges:
         return TickerUniverse().get(exchanges)
     return None  # DataPipeline 내부 기본값 사용

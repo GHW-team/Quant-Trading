@@ -65,15 +65,25 @@ class DataPipeline:
             return yaml.safe_load(f) or {}
 
     def _resolve_tickers(self, ticker_list: Optional[List[str]]) -> List[str]:
+        """티커/거래소 설정을 해석하고 상충 시 에러를 낸다."""
+        data_cfg = self.config.get("data", {}) or {}
+        cfg_tickers = data_cfg.get("tickers") or []
+        cfg_exchanges = data_cfg.get("exchanges") or []
+
+        # 우선순위 충돌 체크
+        if ticker_list and cfg_exchanges:
+            raise ValueError("ticker_list와 data.exchanges를 동시에 지정할 수 없습니다.")
+        if cfg_tickers and cfg_exchanges:
+            raise ValueError("config.yaml의 data.tickers와 data.exchanges를 동시에 채울 수 없습니다.")
+
         if ticker_list:
             return ticker_list
-
-        data_cfg = self.config.get("data", {})
-        if data_cfg.get("tickers"):
-            return list(data_cfg["tickers"])
-
-        exchanges = data_cfg.get("exchanges")
-        return self.ticker_provider.get(exchanges)
+        if cfg_tickers:
+            return list(cfg_tickers)
+        if cfg_exchanges:
+            return self.ticker_provider.get(cfg_exchanges)
+        # 둘 다 비어 있으면 모든 지원 거래소 사용
+        return self.ticker_provider.get(None)
 
     def _resolve_indicator_list(self, indicator_list: Optional[List[str]]) -> List[str]:
         if indicator_list:
