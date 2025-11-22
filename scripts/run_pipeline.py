@@ -261,7 +261,11 @@ def create_parser() -> argparse.ArgumentParser:
         default="INFO",
         help="로그 레벨 (기본: INFO)",
     )
-    parser.add_argument("--config", default="config.yaml", help="설정 파일 경로 (기본: config.yaml)")
+    parser.add_argument(
+        '--config',
+        default='config/config.yaml',
+        help='설정 파일 경로 (기본: config/config.yaml)'
+    )
 
     return parser
 
