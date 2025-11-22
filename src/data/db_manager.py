@@ -6,7 +6,7 @@ from typing import Optional,List,Dict
 from sqlalchemy import create_engine,select,and_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from src.data.models import Base,Ticker,DailyPrice,TechnicalIndicator
+from src.data.db_models import Base,Ticker,DailyPrice,TechnicalIndicator
 from pathlib import Path
 import logging
 

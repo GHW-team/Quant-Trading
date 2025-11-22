@@ -94,7 +94,7 @@ class ConfigLoader:
             # 데이터 설정
             'tickers': self.yaml_config.get('data', {}).get('tickers', ['005930.KS', '000660.KS']),
             'database_path': self.yaml_config.get('data', {}).get('database_path', 'data/database/stocks.db'),
-            'period': self.yaml_config.get('data', {}).get('period', '1y'),
+            'period': self.yaml_config.get('data', {}).get('period'),
             'start_date': self.yaml_config.get('data', {}).get('start_date'),
             'end_date': self.yaml_config.get('data', {}).get('end_date'),
             'update_if_exists': self.yaml_config.get('data', {}).get('update_if_exists', True),
