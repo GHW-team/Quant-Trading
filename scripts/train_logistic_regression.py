@@ -44,13 +44,6 @@ def train_logreg_abs_mom(db_path: pathlib.Path, horizon, threshold):
     # 2) 라벨 생성 (절대 모멘텀)
     df = add_abs_momentum_label(df, horizon=horizon, threshold=threshold)
 
-    # if len(df) < 100:
-    #     raise ValueError(
-    #         f"학습에 사용할 샘플이 너무 적습니다: {len(df)}행. "
-    #         "config/settings.json의 fetch.start / fetch.end 구간을 더 길게 잡거나, "
-    #         "horizon(모멘텀 기간)을 더 짧게 줄여보세요."
-    #     )
-
     # 3) 피처 / 타겟 분리
     feature_cols = [
         "open",
@@ -106,15 +99,15 @@ def export_labels_to_csv(df_used: pd.DataFrame, horizon, threshold):
     out_df["horizon"] = horizon
 
     out_df.to_csv(csv_path, index=False, encoding="utf-8")
-    print("라벨 CSV 저장 완료:", csv_path)
+    print("label CSV 저장 완료:", csv_path)
 
 def main():
     db_path = get_db_path()
     cfg = get_config()
     root = pathlib.Path(__file__).resolve().parents[1]
 
-    logreg, df_used, feature_cols = train_logreg_abs_mom(db_path=db_path, horizon=20, threshold=0.05)
-    export_labels_to_csv(df_used, horizon=20, threshold=0.05)
+    logreg, df_used, feature_cols = train_logreg_abs_mom(db_path=db_path, horizon=5, threshold=0.02)
+    export_labels_to_csv(df_used, horizon=5, threshold=0.02)
     
 if __name__ == "__main__":
     main()
