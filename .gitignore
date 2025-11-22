@@ -251,4 +251,8 @@ docker-compose.override.yml
 
 
 #클로드 개인설정
-.claude/
+.claude/data/output/
+"data/output/*.csv"    # �̹� ������ �ǳʶ�
+
+#대용량파일
+data/output/*.csv

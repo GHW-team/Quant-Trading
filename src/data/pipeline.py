@@ -14,10 +14,12 @@ class DataPipeline:
         self,
         db_path: str = None,
         max_workers: int = None,
-        max_retries: int = None
+        max_retries: int = None,
+        batch_size_default: int = 100,
     ):
         # config.yaml 또는 기본값에서 설정 로드
         self.db_path = db_path or 'data/database/stocks.db'
+        self.batch_size_default = batch_size_default
         max_workers = max_workers or 5
         max_retries = max_retries or 3
 
@@ -147,6 +149,9 @@ class DataPipeline:
             {ticker : DataFrame} 딕셔너리
             DataFrame: OHLCV데이터 + 지표데이터
         """
+
+        # 기본 배치 크기 설정 (None/0 방지)
+        batch_size = batch_size or self.batch_size_default
 
         results = {
             'step1_fetch': {},
@@ -401,6 +406,9 @@ class DataPipeline:
             {ticker : DataFrame} 딕셔너리
             DataFrame: OHLCV데이터
         """
+        # 기본 배치 크기 설정 (None/0 방지)
+        batch_size = batch_size or self.batch_size_default
+
         results = {
             'step1_fetch': {},
             'step2_save_price' : {},
@@ -548,6 +556,9 @@ class DataPipeline:
             {ticker : DataFrame} 딕셔너리
             DataFrame: OHLCV데이터 + 지표데이터
         """
+        # 기본 배치 크기 설정 (None/0 방지)
+        batch_size = batch_size or self.batch_size_default
+
         results = {
             'step1_load_data' : {},
             'step2_calculate' : {},
@@ -778,7 +789,7 @@ if __name__ == "__main__":
                 test_indicators = [
                     ['ma_5'],
                     ['ma_200'],
-                    ['ma_5', 'ma_20', 'ma_200', 'macd']
+                    ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
                 ]
                 base_date = "2024-01-01"
                 for indicators in test_indicators:
@@ -815,7 +826,7 @@ if __name__ == "__main__":
             print("\n[5] run_indicator_pipeline() 테스트 (지표 계산/저장)...")
             try:
                 korean_tickers = ["005930.KS"]  # 삼성전자
-                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+                indicator_list = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
 
                 results = pipeline.run_indicator_pipeline(
                     ticker_list=korean_tickers,
@@ -840,7 +851,7 @@ if __name__ == "__main__":
             print("\n[6] run_full_pipeline() 테스트 (전체 파이프라인)...")
             try:
                 korean_tickers = ["005930.KS"]  # 삼성전자
-                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
+                indicator_list = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_120', 'ma_200', 'macd']
 
                 results = pipeline.run_full_pipeline(
                     ticker_list=korean_tickers,
