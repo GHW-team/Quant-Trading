@@ -1,36 +1,37 @@
-# ========================================
-# 데이터 파이프라인 설정
-# ========================================
+# ==========================================
+# 🔷 데이터 파이프라인 설정
+# ==========================================
+# 어떤 데이터를 다운로드할 것인가?
+# 어떤 지표를 계산할 것인가?
 
 # 1. 데이터 소스 설정
 data:
   # 데이터 경로
   database_path: "data/database/stocks.db"
 
-  # 종목 리스트 (기본값)
+  # 다운로드할 종목 리스트
   tickers:
-    # 한국 대형주 예시
     - "005930.KS"    # 삼성전자
     - "000660.KS"    # SK하이닉스
     # - "051910.KS"    # LG화학
     # - "207940.KS"    # SM Entertainment
 
-  # 기간 설정 (period 또는 start_date/end_date 중 하나)
-  period: "1y"                          # 예: "1y", "6m", "3m"
-  # start_date: "2024-01-01"            # 대신 날짜 범위로 지정
-  # end_date: "2024-12-31"
+  # 데이터 기간 설정 (period 또는 start_date/end_date 중 하나)
+  period:                               # null - start_date/end_date 사용
+  start_date: "2020-01-01"              # 다운로드 시작일
+  end_date: "2023-12-31"                # 다운로드 종료일
 
-  # 데이터 업데이트 설정
-  update_if_exists: true
-  interval: "1d"                        # 일봉: "1d", 주봉: "1wk", 월봉: "1mo"
+  # 데이터 옵션
+  update_if_exists: true                # DB 데이터 업데이트 여부
+  interval: "1d"                        # 봉 단위: "1d"(일), "1wk"(주), "1mo"(월)
 
-# 2. 지표 설정
+# 2. 지표 계산 설정
 indicators:
-  # 계산할 지표 목록
+  # 계산할 지표 목록 (DB에 저장될 모든 지표)
   list:
-    - "ma_5"        # 5일 EMA
-    - "ma_20"       # 20일 EMA
-    - "ma_200"      # 200일 EMA
+    - "ma_5"        # 5일 이동평균
+    - "ma_20"       # 20일 이동평균
+    - "ma_200"      # 200일 이동평균
     - "macd"        # MACD
 
   # 지표 계산 버전
@@ -42,14 +43,55 @@ indicators:
 
 # 3. 배치 처리 설정
 batch:
-  # 한 번에 처리할 종목 개수
-  size: 100
+  size: 100                             # 한 번에 처리할 종목 개수
 
-# 4. 데이터 가져오기 설정 (Fetcher)
+# 4. 데이터 Fetcher 설정
 fetcher:
-  max_workers: 5          # 병렬 처리 스레드 수
-  max_retries: 3          # 재시도 횟수
+  max_workers: 5                        # 병렬 처리 스레드 수
+  max_retries: 3                        # 재시도 횟수
 
-# 5. 로깅 설정
+# ==========================================
+# 🔶 모델 학습 설정
+# ==========================================
+# 준비된 데이터를 어떻게 학습에 사용할 것인가?
+
+model:
+  # 학습 데이터 설정 (data와 독립적으로 제어)
+  training:
+    # 학습에 사용할 종목 (data.tickers의 부분집합)
+    tickers:
+      - "005930.KS"    # 삼성전자
+      - "000660.KS"    # SK하이닉스
+      - "051910.KS"    # LG화학
+      - "207940.KS"    # SM Entertainment
+
+    # 학습 데이터 기간 설정 (period 또는 start_date/end_date 중 하나)
+    period:                             # null - start_date/end_date 사용
+    start_date: "2020-01-01"            # 학습 시작일 (data와 다를 수 있음)
+    end_date: "2023-12-31"              # 학습 종료일
+
+  # 라벨 생성 설정
+  labeling:
+    horizon: 5                          # 예측 기간 (일) - N일 뒤 수익률 기준
+    threshold: 0.02                     # 수익률 임계값 (0.02 = 2%)
+
+  # 학습에 사용할 피처
+  features:
+    # 모델 입력으로 사용할 컬럼 (DB에서 이 컬럼들이 존재해야 함)
+    columns: ['adj_close', 'ma_5', 'ma_20', 'ma_200', 'macd']
+
+    # 데이터 파이프라인에서 계산할 지표 (위 data.indicators.list와 일치해야 함)
+    indicators: ['ma_5', 'ma_20', 'ma_200', 'macd']
+
+  # 모델 저장 설정
+  output:
+    dir: "models"                       # 저장 디렉토리
+    file: "momentum_model.pkl"          # 저장 파일명
+
+# ==========================================
+# 공통 설정
+# ==========================================
+
+# 로깅 설정
 logging:
-  level: "INFO"           # DEBUG, INFO, WARNING, ERROR
+  level: "INFO"                         # DEBUG, INFO, WARNING, ERROR
