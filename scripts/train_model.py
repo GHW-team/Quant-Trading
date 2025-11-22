@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     # 1. config.yaml 읽기
-    config_path = Path(__file__).parent.parent / "config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "config.yaml"
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
