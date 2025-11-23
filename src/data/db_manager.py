@@ -155,6 +155,8 @@ class DatabaseManager:
             "ma_120",
             "ma_200",
             "macd",
+            "macd_signal",
+            "macd_hist"
         ]
 
         ticker_ids: Dict[str, int] = {}
@@ -268,9 +270,15 @@ class DatabaseManager:
                     select(
                         TechnicalIndicator.date,
                         TechnicalIndicator.ma_5,
+                        TechnicalIndicator.ma_10,
                         TechnicalIndicator.ma_20,
+                        TechnicalIndicator.ma_50,
+                        TechnicalIndicator.ma_60,
+                        TechnicalIndicator.ma_120,
                         TechnicalIndicator.ma_200,
                         TechnicalIndicator.macd,
+                        TechnicalIndicator.macd_signal,
+                        TechnicalIndicator.macd_hist
                     )
                     .join(Ticker, Ticker.ticker_id == TechnicalIndicator.ticker_id)
                     .where(Ticker.ticker_code == ticker_code)

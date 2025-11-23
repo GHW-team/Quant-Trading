@@ -66,6 +66,8 @@ class TechnicalIndicator(Base):
     ma_120 = Column(Float)
     ma_200 = Column(Float)
     macd = Column(Float)
+    macd_signal = Column(Float)
+    macd_hist = Column(Float)
     calculated_version = Column(String(30),default='v1.0')
     calculated_at = Column(DateTime(timezone=True), default=get_utc_now)
 

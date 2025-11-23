@@ -117,8 +117,8 @@ class ConfigLoader:
         if cli_args.end_date:
             config["end_date"] = cli_args.end_date
             self.logger.debug("Override from CLI: end_date = %s", config["end_date"])
-        if cli_args.indicators:
-            config["indicators"] = cli_args.indicators
+        if getattr(cli_args, "indicators_list", None):
+            config["indicators"] = cli_args.indicators_list
             self.logger.debug("Override from CLI: indicators = %s", config["indicators"])
         if cli_args.batch_size:
             config["batch_size"] = cli_args.batch_size
@@ -241,7 +241,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--period", help="기간 (예: 1y, 6m, 3m, 1m)")
     parser.add_argument("--start-date", help="시작 날짜 (YYYY-MM-DD, period와 함께 사용 불가)")
     parser.add_argument("--end-date", help="종료 날짜 (YYYY-MM-DD)")
-    parser.add_argument("--indicators-list", dest="indicators", nargs="+", help="계산할 지표")
+    parser.add_argument("--indicators-list", dest="indicators_list", nargs="+", help="계산할 지표")
     parser.add_argument("--batch-size", type=int, help="배치 크기 (기본: 100)")
     parser.add_argument(
         "--update-if-exists",

@@ -38,23 +38,25 @@ class DifferencingMACD:
 class LogisticBuySignalModel:
     """
     절대모멘텀 + EMA60 필터를 통과한 종목에 대해
-    MACD 델타(음→양)를 주요 신호로 사용하는 로지스틱 회귀 헬퍼.
+    MACD 계열 피처로 단기(KOSPI 대비) 초과수익 확률을 추정한다.
     """
 
     def __init__(
         self,
-        horizon_days: int = 63,  # 약 3개월 영업일
-        abs_mom_window: int = 252,  # 약 12개월 영업일
+        horizon_days: int = 20,  # 약 1개월 영업일(단기 홀딩, 민감도 분석시 조정)
+        abs_mom_window: int = 63,  # 약 3개월 영업일(단기 모멘텀 창, 민감도 분석시 조정)
         ema_col: str = "ma_60",
         min_rows: int | None = None,
-        bond_rate_col: str = "bond_3m_rate",  # 일별 3개월물 금리(연율, %)
+        benchmark_col: str = "kospi_close",  # 기준 지수 종가
+        proba_threshold: float = 0.55,  # 신호 평가 기본 임계값
     ) -> None:
         self.horizon_days = horizon_days
         self.abs_mom_window = abs_mom_window
         self.ema_col = ema_col
-        # 최소 필요 데이터 길이: 모멘텀 창 + 미래 수익 계산 구간 + 여유
-        self.min_rows = min_rows or (self.abs_mom_window + self.horizon_days + 10)
-        self.bond_rate_col = bond_rate_col
+        # 최소 필요 데이터 길이: 모멘텀 창 + 미래 수익 계산 구간
+        self.min_rows = min_rows or (self.abs_mom_window + self.horizon_days)
+        self.benchmark_col = benchmark_col
+        self.proba_threshold = proba_threshold
         # 스케일러+로지스틱 회귀 파이프라인(불균형 대응 class_weight)
         self.model = Pipeline(
             steps=[
@@ -71,7 +73,7 @@ class LogisticBuySignalModel:
             ]
         )
         self.feature_cols = [
-            "abs_mom_6m",
+            "abs_mom",
             "ema60_ratio",
             "macd",
             "macd_delta",
@@ -88,7 +90,6 @@ class LogisticBuySignalModel:
                 "Adj Close": "adj_close",
                 "AdjClose": "adj_close",
                 "Close": "close",
-                "bond": "bond_3m_rate",
             }
         )
         return renamed
@@ -99,16 +100,15 @@ class LogisticBuySignalModel:
         if len(df) < self.min_rows:
             return pd.DataFrame()
 
-        df["abs_mom_6m"] = df["adj_close"].pct_change(self.abs_mom_window)
+        df["abs_mom"] = df["adj_close"].pct_change(self.abs_mom_window)
         df["ema60_ratio"] = df["adj_close"] / df[self.ema_col] - 1
         df["macd_delta"] = df["macd"].diff()
         df["fwd_stock_ret"] = df["adj_close"].shift(-self.horizon_days) / df["adj_close"] - 1
-        # 단순이자 근사: 연율 금리를 영업일 기준 연환산 일수로 나눠 적용
-        df["fwd_bond_ret"] = (df[self.bond_rate_col] / 100.0) * (self.horizon_days / 252)
-        df["label"] = (df["fwd_stock_ret"] - df["fwd_bond_ret"] > 0).astype(int)
+        df["fwd_bench_ret"] = df[self.benchmark_col].shift(-self.horizon_days) / df[self.benchmark_col] - 1
+        df["label"] = (df["fwd_stock_ret"] - df["fwd_bench_ret"] > 0).astype(int)
 
         # 필터: 절대모멘텀>0, 가격>EMA60
-        universe_mask = (df["abs_mom_6m"] > 0) & (df["adj_close"] > df[self.ema_col])
+        universe_mask = (df["abs_mom"] > 0) & (df["adj_close"] > df[self.ema_col])
         df = df[universe_mask].copy()
 
         cols_needed = self.feature_cols + ["label", "date", "ticker"]
@@ -117,7 +117,19 @@ class LogisticBuySignalModel:
     def build_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
         """ticker별로 피처/라벨을 만든 뒤 하나로 합친다."""
         df = self._normalize_columns(df)
-        required = {"ticker", "date", "adj_close", self.ema_col, "macd", self.bond_rate_col}
+        # EMA가 없는 경우 adj_close로 계산해 채워준다(데이터 누락 보완용)
+        if self.ema_col not in df.columns and {"ticker", "date", "adj_close"} <= set(df.columns):
+            try:
+                span = int(self.ema_col.split("_")[-1])
+                df[self.ema_col] = (
+                    df.sort_values(["ticker", "date"])
+                    .groupby("ticker")["adj_close"]
+                    .transform(lambda s: s.ewm(span=span, adjust=False).mean())
+                )
+            except Exception:
+                pass
+
+        required = {"ticker", "date", "adj_close", self.ema_col, "macd", self.benchmark_col}
         missing = required - set(df.columns)
         if missing:
             raise ValueError(f"필수 컬럼이 없습니다: {missing}")
@@ -132,22 +144,51 @@ class LogisticBuySignalModel:
         return pd.concat(frames, ignore_index=True)
 
     def fit(self, dataset: pd.DataFrame) -> dict:
-        # 시계열 CV로 대략적인 점수 확인 후 전체 데이터로 재학습
+        """시계열 CV로 점수/PR 지표를 계산한 뒤 전체 데이터로 재학습한다."""
         if dataset.empty:
             raise ValueError("학습할 데이터가 없습니다.")
         X = dataset[self.feature_cols].values
         y = dataset["label"].values
 
-        # 시계열 분할로 검증 지표 대략 확인
+        # 시계열 분할로 정확도 + PR 지표 대략 확인
         tscv = TimeSeriesSplit(n_splits=5)
         cv_scores = []
+        y_true_all: list[float] = []
+        y_score_all: list[float] = []
         for train_idx, test_idx in tscv.split(X):
             self.model.fit(X[train_idx], y[train_idx])
             cv_scores.append(self.model.score(X[test_idx], y[test_idx]))
+            proba_fold = self.model.predict_proba(X[test_idx])[:, 1]
+            y_true_all.extend(y[test_idx])
+            y_score_all.extend(proba_fold)
+
+        pr_auc = None
+        precision_at_thr = None
+        recall_at_thr = None
+        try:
+            from sklearn.metrics import average_precision_score, precision_recall_curve
+
+            pr_auc = float(average_precision_score(y_true_all, y_score_all))
+            precision, recall, thresholds = precision_recall_curve(y_true_all, y_score_all)
+            thr = self.proba_threshold
+            mask = thresholds >= thr
+            if mask.any():
+                idx = mask.argmax()
+                precision_at_thr = float(precision[idx])
+                recall_at_thr = float(recall[idx])
+        except Exception:
+            pass
 
         # 전체로 재학습
         self.model.fit(X, y)
-        return {"cv_scores": cv_scores, "n_samples": len(dataset)}
+        return {
+            "cv_scores": cv_scores,
+            "pr_auc": pr_auc,
+            "precision_at_threshold": precision_at_thr,
+            "recall_at_threshold": recall_at_thr,
+            "threshold": self.proba_threshold,
+            "n_samples": len(dataset),
+        }
 
     def predict_proba(self, dataset: pd.DataFrame) -> pd.Series:
         # 매수 성공 확률(buy_proba) 반환
@@ -156,56 +197,3 @@ class LogisticBuySignalModel:
         X = dataset[self.feature_cols].values
         proba = self.model.predict_proba(X)[:, 1]
         return pd.Series(proba, index=dataset.index, name="buy_proba")
-
-
-# 테스트용 데이터
-if __name__ == "__main__":
-    dates = pd.date_range("2024-01-01", periods=300, freq="B")
-
-    def build_block(ticker: str, base_price: float, volume_start: int) -> pd.DataFrame:
-        prices = np.linspace(base_price, base_price + 15, len(dates))
-        volumes = np.linspace(volume_start, volume_start + 500, len(dates))
-        block = pd.DataFrame(
-            {
-                "Ticker": [ticker] * len(dates),
-                "Date": dates,
-                "Open": prices + 0.1,
-                "High": prices + 0.5,
-                "Low": prices - 0.5,
-                "Close": prices,
-                "Volume": volumes,
-            }
-        )
-        block["Adj Close"] = block["Close"] * 0.99
-        return block
-
-    sample = pd.concat(
-        [
-            build_block("AAA", 10, 1000),
-            build_block("BBB", 20, 2000),
-        ],
-        ignore_index=True,
-    )
-
-    calc = IndicatorCalculator()
-    macd = DifferencingMACD(calc)
-    macd_df = macd.run(sample)
-
-    merged = (
-        sample.merge(macd_df, on=["Ticker", "Date"], how="left")
-        .rename(columns=lambda c: c.lower().replace(" ", "_"))
-    )
-    merged["ma_60"] = merged.groupby("ticker")["adj_close"].transform(
-        lambda s: s.ewm(span=60, adjust=False).mean()
-    )
-
-    model = LogisticBuySignalModel()
-    dataset = model.build_dataset(merged)
-    if not dataset.empty:
-        summary = model.fit(dataset)
-        print("cv scores:", summary["cv_scores"])
-        proba = model.predict_proba(dataset.head(5))
-        print("sample proba:", proba.tolist())
-    else:
-        print("empty dataset")
-

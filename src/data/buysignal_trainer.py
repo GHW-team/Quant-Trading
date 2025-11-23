@@ -73,8 +73,16 @@ class BuySignalTrainer:
         for ticker in tickers:
             price_df = self._normalize_dates(prices.get(ticker, pd.DataFrame()))
             ind_df = self._normalize_dates(indicators.get(ticker, pd.DataFrame()))
+            # 가격/지표가 비어 있거나, EMA/핵심 지표가 NaN이라면 스킵
             if price_df.empty or ind_df.empty:
                 logging.warning("%s: missing price or indicator data; price_rows=%d, ind_rows=%d", ticker, len(price_df), len(ind_df))
+                continue
+            needed = ["ma_60", "macd", "macd_hist"]
+            if not set(needed).issubset(ind_df.columns):
+                logging.warning("%s: required indicator columns missing; have=%s", ticker, list(ind_df.columns))
+                continue
+            if ind_df[needed].isna().any(axis=None):
+                logging.warning("%s: core indicators contain NaN; skipping", ticker)
                 continue
 
             merged = price_df.merge(ind_df, on="date", how="left")
@@ -98,6 +106,46 @@ class BuySignalTrainer:
         feature_df = self.model.build_dataset(dataset)
         proba = self.model.predict_proba(feature_df)
         return feature_df.assign(buy_proba=proba)
+
+    def generate_signals(
+        self,
+        tickers: List[str],
+        benchmark_df: pd.DataFrame,
+        threshold: Optional[float] = None,
+        include_prices: bool = True,
+    ) -> pd.DataFrame:
+        """
+        backtrader 등에서 바로 사용할 수 있는 신호/확률 테이블을 만든다.
+        threshold 미지정 시 모델 기본 임계값을 사용하며, 필요 시 가격 컬럼까지 병합한다.
+        """
+        threshold = threshold if threshold is not None else getattr(self.model, "proba_threshold", 0.5)
+
+        # 데이터셋 생성 및 확률/신호 산출
+        dataset = self.load_dataset(tickers, benchmark_df)
+        feature_df = self.model.build_dataset(dataset)
+        proba = self.model.predict_proba(feature_df)
+        signals = feature_df.assign(buy_proba=proba, buy_signal=lambda df: df["buy_proba"] >= threshold)
+
+        if not include_prices:
+            return signals.sort_values(["date", "ticker"]).reset_index(drop=True)
+
+        prices = self.db.load_price_data(tickers, start_date=self.start_date, end_date=self.end_date)
+        frames: List[pd.DataFrame] = []
+        for ticker in tickers:
+            price_df = self._normalize_dates(prices.get(ticker, pd.DataFrame()))
+            sig_df = signals[signals["ticker"] == ticker]
+            if price_df.empty or sig_df.empty:
+                continue
+            merged = sig_df.merge(price_df, on="date", how="left", suffixes=("", "_price"))
+            frames.append(merged)
+
+        if not frames:
+            return pd.DataFrame()
+        return (
+            pd.concat(frames, ignore_index=True)
+            .sort_values(["date", "ticker"])
+            .reset_index(drop=True)
+        )
 
 
 __all__ = ["BuySignalTrainer"]
