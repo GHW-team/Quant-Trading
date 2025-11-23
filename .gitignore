@@ -256,11 +256,14 @@ docker-compose.override.yml
 
 #대용량파일
 data/output/*.csv
-"data/database/*.bak" 
-"data/database/*.bak" 
 data\kospi_benchmark.csv
-"data\kospi_benchmark.csv"
+data\kospi_benchmark.csv
 data/database/*.db
 data/database/*.bak
 data/database/*.db
 data/database/*.bak
+
+# Local data (project-specific large files)
+data/kospi_benchmark.csv
+data/korea_stock_list.xls
+src/quant_data.db
