@@ -64,3 +64,6 @@ isort==5.13.2                # 최신 import 정렬
 # ===== Windows 전용 (키움증권) =====
 # Python 3.11 완벽 호환
 pywin32==308; sys_platform == 'win32' 
+
+#티커 크롤링
+lxml==25.3
