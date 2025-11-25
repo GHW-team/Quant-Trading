@@ -1,3 +1,4 @@
+"""데이터 수집·저장·지표계산 파이프라인 (로직 변경 없이 주석만 추가)."""
 import logging
 import pandas as pd
 from datetime import datetime, timedelta

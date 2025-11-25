@@ -1,4 +1,5 @@
-#IndicatorCalculator
+# IndicatorCalculator
+# OHLCV DataFrame에 이동평균·MACD 등을 계산해 컬럼으로 추가하는 유틸
 import pandas as pd
 import numpy as np
 import pandas_ta_classic as ta
@@ -9,6 +10,7 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 class IndicatorCalculator:
+    # 계산에 사용되는 지표와 대응 함수 맵
     @staticmethod
     def _calc_sma(df: pd.DataFrame, length: int)-> pd.Series:
         return ta.sma(df['adj_close'],length=length)
@@ -76,6 +78,7 @@ class IndicatorCalculator:
         indicator_list: Optional[List[str]] = None
         )-> Optional[pd.DataFrame]:
 
+        # -------- 입력 검증 단계 --------
         # DataFrame validation
         if df.empty:
             logger.error("Empty dataframe provided")
@@ -98,7 +101,7 @@ class IndicatorCalculator:
         # Validate indicators before calculation
         self.validate_indicators(indicator_list)
 
-        # Calculation
+        # -------- 지표 계산 단계 --------
         result_df = df.copy()
         errors = {}
 

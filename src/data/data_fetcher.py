@@ -1,5 +1,7 @@
 # StockDataFetcher
+# yfinance로 OHLCV를 수집하고 병렬 처리/재시도/컬럼 정규화를 수행하는 헬퍼
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
@@ -12,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class StockDataFetcher:
-    """yfinance 기반 주식 데이터 수집기"""
+    """yfinance 기반 주식 데이터를 기간/날짜 범위로 수집하는 유틸리티"""
 
     def __init__(
         self,
@@ -22,13 +24,13 @@ class StockDataFetcher:
         """
         Args:
             max_workers: 동시 실행 스레드 수
-            max_retries: 재시도 횟수
+            max_retries: 실패 시 재시도 횟수 (지수 백오프)
         """
         self.max_workers = max_workers
         self.max_retries = max_retries
 
     # ------------------------------------------------------------------ #
-    # 내부 단일 호출
+    # 단일 수집
     # ------------------------------------------------------------------ #
     def _fetch_single_by_period(
         self,
@@ -37,6 +39,7 @@ class StockDataFetcher:
         interval: str = "1d",
         actions: bool = False,
     ) -> Optional[pd.DataFrame]:
+        # 기간 단위로 단일 종목 조회, 실패 시 지수 백오프 재시도
         for attempt in range(1, self.max_retries + 1):
             try:
                 stock = yf.Ticker(ticker)
@@ -50,7 +53,7 @@ class StockDataFetcher:
                     logger.warning("%s: Empty data returned", ticker)
                     return None
 
-                # format columns (Date index -> column, lowercase)
+                # Date 인덱스를 컬럼으로 풀고 snake_case로 정규화
                 df = df.reset_index()
                 df.columns = (
                     df.columns.str.strip()
@@ -87,6 +90,7 @@ class StockDataFetcher:
         interval: str = "1d",
         actions: bool = False,
     ) -> Optional[pd.DataFrame]:
+        # 날짜 범위로 단일 종목 조회
         for attempt in range(1, self.max_retries + 1):
             try:
                 stock = yf.Ticker(ticker=ticker)
@@ -102,7 +106,7 @@ class StockDataFetcher:
                     logger.warning("%s: Empty data returned", ticker)
                     return None
 
-                # format columns
+                # Date 인덱스를 컬럼으로 풀고 snake_case로 정규화
                 df = df.reset_index()
                 df.columns = (
                     df.columns.str.strip()
@@ -132,7 +136,7 @@ class StockDataFetcher:
         return None
 
     # ------------------------------------------------------------------ #
-    # 병렬 수집기
+    # 병렬 수집
     # ------------------------------------------------------------------ #
     def fetch_multiple_by_period(
         self,
@@ -141,6 +145,7 @@ class StockDataFetcher:
         interval: str = "1d",
         actions: bool = False,
     ) -> Dict[str, pd.DataFrame]:
+        # 여러 종목을 기간 기준 병렬 수집
         results: Dict[str, pd.DataFrame] = {}
         if not ticker_list:
             logger.warning("Ticker list is empty")
@@ -181,6 +186,7 @@ class StockDataFetcher:
         interval: str = "1d",
         actions: bool = False,
     ) -> Dict[str, pd.DataFrame]:
+        # 여러 종목을 날짜 범위 기준 병렬 수집
         results: Dict[str, pd.DataFrame] = {}
         if not ticker_list:
             logger.warning("Ticker list is empty")
