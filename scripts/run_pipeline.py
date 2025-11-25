@@ -353,8 +353,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '--config',
-        default='config.yaml',
-        help='설정 파일 경로 (기본: config.yaml)'
+        default='config/config.yaml',
+        help='설정 파일 경로 (기본: config/config.yaml)'
     )
 
     return parser
