@@ -1,3 +1,4 @@
+"""데이터 수집·저장·지표계산 파이프라인 (로직 변경 없이 주석만 추가)."""
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -14,10 +15,12 @@ class DataPipeline:
         self,
         db_path: str = None,
         max_workers: int = None,
-        max_retries: int = None
+        max_retries: int = None,
+        batch_size_default: int = 100,
     ):
         # config.yaml 또는 기본값에서 설정 로드
         self.db_path = db_path or 'data/database/stocks.db'
+        self.batch_size_default = batch_size_default
         max_workers = max_workers or 5
         max_retries = max_retries or 3
 
@@ -147,6 +150,9 @@ class DataPipeline:
             {ticker : DataFrame} 딕셔너리
             DataFrame: OHLCV데이터 + 지표데이터
         """
+
+        # 기본 배치 크기 설정 (None/0 방지)
+        batch_size = batch_size or self.batch_size_default
 
         results = {
             'step1_fetch': {},
@@ -401,6 +407,9 @@ class DataPipeline:
             {ticker : DataFrame} 딕셔너리
             DataFrame: OHLCV데이터
         """
+        # 기본 배치 크기 설정 (None/0 방지)
+        batch_size = batch_size or self.batch_size_default
+
         results = {
             'step1_fetch': {},
             'step2_save_price' : {},
@@ -548,6 +557,9 @@ class DataPipeline:
             {ticker : DataFrame} 딕셔너리
             DataFrame: OHLCV데이터 + 지표데이터
         """
+        # 기본 배치 크기 설정 (None/0 방지)
+        batch_size = batch_size or self.batch_size_default
+
         results = {
             'step1_load_data' : {},
             'step2_calculate' : {},
