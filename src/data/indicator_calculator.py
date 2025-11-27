@@ -28,7 +28,12 @@ class IndicatorCalculator:
 
     INDICATORS_FUNCTIONS = {
         'ma_5' : lambda df : IndicatorCalculator._calc_ema(df,5),
+        'ma_10' : lambda df : IndicatorCalculator._calc_ema(df,10),
         'ma_20' : lambda df : IndicatorCalculator._calc_ema(df,20),
+        'ma_50' : lambda df : IndicatorCalculator._calc_ema(df,50),
+        'ma_60' : lambda df : IndicatorCalculator._calc_ema(df,60),
+        'ma_100': lambda df : IndicatorCalculator._calc_ema(df,100),
+        'ma_120' : lambda df : IndicatorCalculator._calc_ema(df,120),
         'ma_200' : lambda df : IndicatorCalculator._calc_ema(df,200),
         'macd' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,0],
         'macd_signal' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,1],
@@ -55,7 +60,12 @@ class IndicatorCalculator:
         # 지표별 필요한 과거 기간
         lookback_map = {
             'ma_5': 5,
+            'ma_10': 10,
             'ma_20': 20,
+            'ma_50': 50,
+            'ma_60': 60,
+            'ma_100': 100,
+            'ma_120': 120,
             'ma_200': 200,
             'macd': 26,              # slow period
             'macd_signal': 26,
