@@ -84,7 +84,8 @@ class ConfigLoader:
             "interval": data_cfg.get("interval", "1d"),
 
             # 지표 설정
-            "indicators": indicators_cfg.get("list", ["ma_5","ma_10", "ma_20", "ma_50", "ma_60", "ma_100", "ma_120", "ma_200", "macd", "macd_hist", "macd_signal"]),
+            "indicators": indicators_cfg.get("list", ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_hist', 'macd_signal',
+                      'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct', 'atr', 'hv', 'stoch_k', 'stoch_d', 'obv']),
             "indicator_version": indicators_cfg.get("version", "v1.0"),
 
             # 배치 설정

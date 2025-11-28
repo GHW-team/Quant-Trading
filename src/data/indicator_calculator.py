@@ -25,7 +25,38 @@ class IndicatorCalculator:
                    slow:int,
                    signal:int)-> pd.Series:
         return ta.macd(df['adj_close'],fast=fast, slow=slow, signal=signal)
+    
+    @staticmethod
+    def _calc_rsi(df: pd.DataFrame, length: int)->pd.Series:
+         # 필요하다면 컬럼 검사/NaN 처리 추가
+        return ta.rsi(df['adj_close'], length = length)
+    
+    @staticmethod
+    def _calc_bbands(df: pd.DataFrame, length: int, std: int)->pd.DataFrame:
+        #upper,mid,lower,%b 컬럼을 반환함
+        return ta.bbands(df['adj_close'], length = length, std = std)
+    
+    @staticmethod
+    def _calc_atr(df:pd.DataFrame, length: int)->pd.Series:
+        return ta.atr(df['high'], df['low'], df['close'], length = length)
+    
+    @staticmethod
+    def _calc_hv(df: pd.DataFrame, length: int, annual_factor: int=252)-> pd.Series:
+        log_ret = np.log(df['adj_close']).diff()
+        return log_ret.rolling(length).std() * np.sqrt(annual_factor)
+    
+    @staticmethod
+    def _calc_stoch(df: pd.DataFrame, k: int, d: int)-> pd.DataFrame:
+        #%K, %D컬럼 반환
+        return ta.stoch(df['high'], df['low'], df['close'], k=k, d=d)
+    
+    @staticmethod
+    def _calc_obv(df: pd.DataFrame)->pd.Series:
+        return ta.obv(df['close'], df['volume'])
+    
 
+    #rsi,볼린저밴드,atr,hv,스토캐스틱 등은 현재 기본값으로 설정해뒀으니 이 값을 바꿀 경우 이름을 바꿔주기바람
+    #ex) 볼린저밴드의 이동평균선을 50일, 표준편차 2를 사용할 경우: bb_upper_50_2
     INDICATORS_FUNCTIONS = {
         'ma_5' : lambda df : IndicatorCalculator._calc_ema(df,5),
         'ma_10' : lambda df : IndicatorCalculator._calc_ema(df,10),
@@ -38,6 +69,16 @@ class IndicatorCalculator:
         'macd' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,0],
         'macd_signal' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,1],
         'macd_hist' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,2],
+        'rsi' : lambda df : IndicatorCalculator._calc_rsi(df,14),
+        'bb_upper': lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 0],
+        'bb_mid':   lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 1],
+        'bb_lower': lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 2],
+        'bb_pct':   lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 3],
+        'atr':  lambda df: IndicatorCalculator._calc_atr(df, 14),
+        "hv":   lambda df: IndicatorCalculator._calc_hv(df, 20, 252),
+        'stoch_k': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 0],
+        'stoch_d': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 1],
+        'obv':     lambda df: IndicatorCalculator._calc_obv(df)
     }
 
     def __init__(self):
@@ -71,6 +112,15 @@ class IndicatorCalculator:
             'macd_signal': 26,
             'macd_hist': 26,
             'rsi': 14,               # RSI 기본값 (향후 추가 가능)
+            'bb_upper': 20,          #볼린저밴드 기본값
+            'bb_mid': 20,
+            'bb_lower': 20,
+            'bb_pct': 20,
+            'atr' : 14,              #ATR 기본값
+            'hv' : 20,               #HV 기본값 
+            'stoch_k' : 14,          #스토캐스틱 기본값: k=14,d=3
+            'stoch_d' : 14,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
+            'obv' : 1
         }
 
         # 요청한 지표 중 최대 lookback 일수 구하기

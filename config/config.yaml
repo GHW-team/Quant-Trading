@@ -44,6 +44,14 @@ indicators:
     - "macd"        # MACD
     - "macd_hist"
     - "macd_signal"
+    - "rsi"
+    - "bb_upper"
+    - "bb_mid"
+    - "bb_lower"
+    - "bb_pct"
+    - "atr"
+    - "hv"
+    - "obv"
 
   # 지표 계산 버전
   version: "v1.0"
