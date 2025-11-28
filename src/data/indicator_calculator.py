@@ -43,12 +43,15 @@ class IndicatorCalculator:
     @staticmethod
     def _calc_hv(df: pd.DataFrame, length: int, annual_factor: int=252)-> pd.Series:
         log_ret = np.log(df['adj_close']).diff()
+        # 연환산 변동성 (스케일은 0.24 = 연 24%)
         return log_ret.rolling(length).std() * np.sqrt(annual_factor)
     
     @staticmethod
     def _calc_stoch(df: pd.DataFrame, k: int, d: int)-> pd.DataFrame:
         #%K, %D컬럼 반환
-        return ta.stoch(df['high'], df['low'], df['close'], k=k, d=d)
+        stoch_df = ta.stoch(df['high'], df['low'], df['close'], k=k, d=d)
+        #부족분은 NaN으로 유지
+        return stoch_df.reindex(df.index)
     
     @staticmethod
     def _calc_obv(df: pd.DataFrame)->pd.Series:

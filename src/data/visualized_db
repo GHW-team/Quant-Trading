@@ -6,7 +6,7 @@ from pathlib import Path
 
 db_path = "data/database/stocks.db"
 ticker_code = "005930.KS"
-output_path = Path("chart.png")  # 필요한 경우 쓰기 가능한 경로로 변경
+output_path = Path("data/database/chart.png")  # 저장 경로
 
 with sqlite3.connect(db_path) as conn:
     # DB 스키마: tickers(ticker_code) -> daily_prices(ticker_id) -> technical_indicators(ticker_id, date)
@@ -66,7 +66,8 @@ for col in numeric_cols:
 if df.empty:
     raise SystemExit(f"No data found for ticker {ticker_code}. Check if the pipeline populated technical_indicators.")
 
-fig, axes = plt.subplots(6, 1, figsize=(12, 18), sharex=True)
+# 가격과 지표를 함께 보기 좋은 순서로 배치
+fig, axes = plt.subplots(7, 1, figsize=(12, 20), sharex=True)
 
 # 가격 + 이동평균 + 볼린저 밴드
 df[["close", "ma_20", "ma_60", "bb_upper", "bb_mid", "bb_lower"]].plot(ax=axes[0])
@@ -91,13 +92,17 @@ axes[3].axhline(80, color="red", lw=0.8, linestyle="--")
 axes[3].axhline(20, color="green", lw=0.8, linestyle="--")
 axes[3].set_title("Stochastic %K / %D")
 
-# HV / ATR
-df[["hv", "atr"]].plot(ax=axes[4])
-axes[4].set_title("Historical Volatility / ATR")
+# ATR (원래 스케일)
+df[["atr"]].plot(ax=axes[4])
+axes[4].set_title("ATR")
+
+# HV (원래 스케일, 예: 0.24 = 24% 연환산)
+df[["hv"]].plot(ax=axes[5])
+axes[5].set_title("Historical Volatility (annualized)")
 
 # OBV
-df[["obv"]].plot(ax=axes[5])
-axes[5].set_title("OBV")
+df[["obv"]].plot(ax=axes[6])
+axes[6].set_title("OBV")
 
 plt.tight_layout()
 try:
