@@ -720,7 +720,7 @@ class TestDatabaseManagerMetadata:
     """메타데이터 테스트"""
 
     def test_save_ticker_metadata(self, db_manager):
-        """ticker 메타데이터 저장"""
+        """ticker 메타데이터 저장 및 검증"""
         # ticker 생성
         db_manager._get_ticker_id('005930.KS')
 
@@ -728,17 +728,107 @@ class TestDatabaseManagerMetadata:
         metadata = {'name': 'Samsung Electronics', 'sector': 'Electronics'}
         db_manager.save_ticker_metadata('005930.KS', metadata)
 
+        # DB에서 직접 조회하여 검증
+        ticker = db_manager.session.query(Ticker).filter_by(ticker_code='005930.KS').first()
+        assert ticker is not None
+        assert ticker.name == 'Samsung Electronics'
+        assert ticker.sector == 'Electronics'
+
+    def test_save_ticker_metadata_nonexistent_ticker(self, db_manager, caplog):
+        """존재하지 않는 ticker에 메타데이터 저장 시도 (경고 로그 발생)"""
+        # ticker를 생성하지 않고 바로 메타데이터 저장 시도
+        metadata = {'name': 'Test Company', 'sector': 'Test Sector'}
+        db_manager.save_ticker_metadata('NONEXISTENT.KS', metadata)
+
+        # 경고 로그 확인
+        assert "not found" in caplog.text
+        assert "NONEXISTENT.KS" in caplog.text
+
+    @pytest.mark.parametrize("field_to_update, field_value", [
+        ('name', 'SK Hynix'),
+        ('sector', 'Semiconductor'),
+    ])
+    def test_save_ticker_metadata_partial_update(self, db_manager, field_to_update, field_value):
+        """일부 필드만 업데이트 (name만 또는 sector만)"""
+        # ticker 생성 및 초기 메타데이터 저장
+        db_manager._get_ticker_id('000660.KS')
+        initial_metadata = {'name': 'Initial Name', 'sector': 'Initial Sector'}
+        db_manager.save_ticker_metadata('000660.KS', initial_metadata)
+
+        # 일부 필드만 업데이트
+        partial_metadata = {field_to_update: field_value}
+        db_manager.save_ticker_metadata('000660.KS', partial_metadata)
+
+        # DB 검증
+        ticker = db_manager.session.query(Ticker).filter_by(ticker_code='000660.KS').first()
+
+        if field_to_update == 'name':
+            assert ticker.name == field_value
+            assert ticker.sector == 'Initial Sector'  # 변경되지 않음
+        else:  # sector
+            assert ticker.name == 'Initial Name'  # 변경되지 않음
+            assert ticker.sector == field_value
+
+    def test_save_ticker_metadata_same_value_no_commit(self, db_manager):
+        """같은 값으로 재저장 시 불필요한 commit 방지"""
+        # ticker 생성 및 메타데이터 저장
+        db_manager._get_ticker_id('005930.KS')
+        metadata = {'name': 'Samsung', 'sector': 'Electronics'}
+        db_manager.save_ticker_metadata('005930.KS', metadata)
+
+        # Mock으로 commit 호출 감시
+        with patch.object(db_manager.session, 'commit') as mock_commit:
+            # 같은 값으로 재저장 (updated=False가 되어야 함)
+            db_manager.save_ticker_metadata('005930.KS', metadata)
+
+            # commit이 호출되지 않았는지 확인
+            mock_commit.assert_not_called()
+
+    def test_save_ticker_metadata_update_existing(self, db_manager):
+        """기존 메타데이터 덮어쓰기"""
+        # ticker 생성 및 초기 메타데이터 저장
+        db_manager._get_ticker_id('005930.KS')
+        initial_metadata = {'name': 'Old Name', 'sector': 'Old Sector'}
+        db_manager.save_ticker_metadata('005930.KS', initial_metadata)
+
+        # 메타데이터 업데이트
+        new_metadata = {'name': 'Samsung Electronics', 'sector': 'Technology'}
+        db_manager.save_ticker_metadata('005930.KS', new_metadata)
+
+        # DB 검증
+        ticker = db_manager.session.query(Ticker).filter_by(ticker_code='005930.KS').first()
+        assert ticker.name == 'Samsung Electronics'
+        assert ticker.sector == 'Technology'
+
+    def test_save_ticker_metadata_empty_dict(self, db_manager):
+        """빈 메타데이터 딕셔너리 전달"""
+        # ticker 생성 및 초기 메타데이터 저장
+        db_manager._get_ticker_id('005930.KS')
+        initial_metadata = {'name': 'Samsung', 'sector': 'Electronics'}
+        db_manager.save_ticker_metadata('005930.KS', initial_metadata)
+
+        # 빈 딕셔너리로 저장 시도
+        db_manager.save_ticker_metadata('005930.KS', {})
+
+        # 기존 값이 유지되어야 함
+        ticker = db_manager.session.query(Ticker).filter_by(ticker_code='005930.KS').first()
+        assert ticker.name == 'Samsung'
+        assert ticker.sector == 'Electronics'
+
     @pytest.mark.parametrize("tickers_to_create, tickers_to_load, expected_count", [
         (['005930.KS'], ['005930.KS'], 1),                          # 특정 ticker만 로드
         (['005930.KS', '000660.KS'], ['005930.KS', '000660.KS'], 2), # 여러 ticker 로드
-        (['005930.KS', '000660.KS'], None, 2),                      # 모든 ticker 로드
+        (['005930.KS', '000660.KS', '000392.KS'], None, 3),                      # 모든 ticker 로드
     ])
     def test_load_ticker_metadata(self, db_manager, tickers_to_create, tickers_to_load, expected_count):
-        """ticker 메타데이터 로드 (특정/전체)"""
+        """ticker 메타데이터 로드 (특정/전체) - 값 검증 포함"""
         # ticker 생성
         for ticker_code in tickers_to_create:
             db_manager._get_ticker_id(ticker_code)
-            db_manager.save_ticker_metadata(ticker_code, {'name': f'Test {ticker_code}'})
+            db_manager.save_ticker_metadata(ticker_code, {
+                'name': f'Test {ticker_code}',
+                'sector': f'Sector {ticker_code}'
+            })
 
         # 로드
         df_metadata = db_manager.load_ticker_metadata(tickers_to_load)
@@ -747,8 +837,42 @@ class TestDatabaseManagerMetadata:
             assert len(df_metadata) == expected_count
             for ticker_code in tickers_to_load:
                 assert ticker_code in df_metadata.index
+                # 실제 값 검증 추가
+                assert df_metadata.loc[ticker_code, 'name'] == f'Test {ticker_code}'
+                assert df_metadata.loc[ticker_code, 'sector'] == f'Sector {ticker_code}'
         else:
-            assert len(df_metadata) >= expected_count
+            assert len(df_metadata) == expected_count
+
+    def test_load_ticker_metadata_nonexistent(self, db_manager):
+        """존재하지 않는 ticker 로드 시 빈 DataFrame"""
+        df_metadata = db_manager.load_ticker_metadata(['NONEXISTENT.KS'])
+
+        assert df_metadata.empty
+
+    def test_save_and_load_metadata_workflow(self, db_manager):
+        """메타데이터 저장/업데이트/로드 전체 워크플로우"""
+        # 1. ticker 생성 및 초기 메타데이터 저장
+        db_manager._get_ticker_id('005930.KS')
+        db_manager.save_ticker_metadata('005930.KS', {
+            'name': 'Samsung',
+            'sector': 'Electronics'
+        })
+
+        # 2. 로드하여 검증
+        df1 = db_manager.load_ticker_metadata(['005930.KS'])
+        assert df1.loc['005930.KS', 'name'] == 'Samsung'
+        assert df1.loc['005930.KS', 'sector'] == 'Electronics'
+
+        # 3. 메타데이터 업데이트
+        db_manager.save_ticker_metadata('005930.KS', {
+            'name': 'Samsung Electronics',
+            'sector': 'Technology'
+        })
+
+        # 4. 다시 로드하여 업데이트 확인
+        df2 = db_manager.load_ticker_metadata(['005930.KS'])
+        assert df2.loc['005930.KS', 'name'] == 'Samsung Electronics'
+        assert df2.loc['005930.KS', 'sector'] == 'Technology'
 
 
 class TestDatabaseManagerIntegration:
