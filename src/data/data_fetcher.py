@@ -26,6 +26,11 @@ class StockDataFetcher:
             max_workers: 동시 실행 스레드 수
             max_retries: 실패 시 재시도 횟수 (지수 백오프)
         """
+        if max_workers < 1:
+            raise ValueError("max_workers must be at least 1")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+
         self.max_workers = max_workers
         self.max_retries = max_retries
 

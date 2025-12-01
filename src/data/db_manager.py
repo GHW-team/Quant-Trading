@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
 
-from src.data.models import Base, Ticker, DailyPrice, TechnicalIndicator
+from src.data.db_models import Base, Ticker, DailyPrice, TechnicalIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ class DatabaseManager:
                 except Exception as e:
                     logger.error(f"✗ Failed to save price data for {ticker_code}: {e}")
                     results[ticker_code] = 0
+                    continue
 
         logger.info(f"Bulk price save completed for {len(results)} tickers in single transaction")
         return results
@@ -291,7 +292,7 @@ class DatabaseManager:
 
             except Exception as e:
                 logger.error(f"✗ Failed to load price data for {ticker_code}: {e}")
-                raise
+                continue
 
         logger.info(f"Bulk price load completed for {len(ticker_codes)} tickers")
         return df_dict
@@ -338,7 +339,7 @@ class DatabaseManager:
 
             except Exception as e:
                 logger.error(f"✗ Failed to load indicators for {ticker_code}: {e}")
-                raise
+                continue
 
         logger.info(f"Bulk indicator load completed for {len(ticker_codes)} tickers")
         return df_dict
