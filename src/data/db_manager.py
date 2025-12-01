@@ -243,8 +243,7 @@ class DatabaseManager:
             stmt = stmt.where(Ticker.ticker_code.in_(ticker_codes))
 
         df = pd.read_sql(stmt, self.engine)
-        if not df.empty:
-            df.set_index('ticker_code', inplace=True) # 티커를 인덱스로
+        df.set_index('ticker_code', inplace=True) # 티커를 인덱스로
 
         return df
 

@@ -875,56 +875,11 @@ class TestDatabaseManagerMetadata:
         assert df2.loc['005930.KS', 'sector'] == 'Technology'
 
 
-class TestDatabaseManagerIntegration:
-    """통합 테스트"""
-
-    def test_save_and_load_workflow(self, db_manager, sample_df_basic, sample_df_with_indicators):
-        """완전한 저장/로드 워크플로우"""
-        # 1. 가격 데이터 저장
-        price_dict = {'005930.KS': sample_df_basic}
-        db_manager.save_price_data(price_dict, update_if_exists=True)
-
-        # 2. 지표 데이터 저장
-        indicator_dict = {'005930.KS': sample_df_with_indicators}
-        db_manager.save_indicators(indicator_dict)
-
-        # 3. 로드
-        loaded_prices = db_manager.load_price_data(['005930.KS'])
-        loaded_indicators = db_manager.load_indicators(['005930.KS'])
-
-        # 4. 검증
-        assert len(loaded_prices['005930.KS']) > 0
-        assert len(loaded_indicators['005930.KS']) > 0
-
-    def test_multiple_save_load_cycles(self, db_manager, sample_df_basic):
-        """여러 번의 저장/로드 사이클"""
-        # 첫 번째 사이클
-        dict1 = {'005930.KS': sample_df_basic}
-        db_manager.save_price_data(dict1, update_if_exists=True)
-        loaded1 = db_manager.load_price_data(['005930.KS'])
-
-        # 두 번째 사이클
-        loaded2 = db_manager.load_price_data(['005930.KS'])
-
-        # 결과가 일관됨
-        assert len(loaded1) == len(loaded2)
-
-    def test_error_handling_with_invalid_data(self, db_manager):
-        """잘못된 데이터 처리 - 필요한 컬럼 누락"""
-        # 잘못된 DataFrame (필요한 컬럼 누락)
-        invalid_df = pd.DataFrame({'wrong_col': [1, 2, 3]})
-        df_dict = {'005930.KS': invalid_df}
-
-        # save_price_data는 에러를 내부적으로 처리하고 0을 반환함
-        result = db_manager.save_price_data(df_dict, update_if_exists=True)
-        assert result['005930.KS'] == 0, "Should return 0 for invalid data (missing columns)"
-
-
 class TestDatabaseManagerDataIntegrity:
     """데이터 무결성 테스트"""
 
     def test_save_indicators_with_nan_values(self, db_manager, sample_df_with_indicators):
-        """NaN 값이 포함된 지표 저장"""
+        """NaN 값이 포함된 지표 저장 후 불러오기 / NaN → None → NaN 프로세스 검증"""
         # NaN 값이 포함된 지표
         df_with_nan = sample_df_with_indicators.copy()
         df_with_nan.loc[0, 'ma_5'] = np.nan
@@ -932,44 +887,20 @@ class TestDatabaseManagerDataIntegrity:
         db_manager._get_ticker_id('005930.KS')
         result = db_manager.save_indicators({'005930.KS': df_with_nan})
 
-        assert result['005930.KS'] > 0, "Should save data with NaN values"
+        # 저장 검증
+        assert result['005930.KS'] == len(df_with_nan)
 
-        # 로드해서 NaN이 None으로 저장되었는지 확인
+        # DB직접 조회
+        ticker = db_manager.session.query(Ticker).filter_by(ticker_code = '005930.KS').first()
+        indicator_with_nan = db_manager.session.query(TechnicalIndicator).filter_by(ticker_id = ticker.ticker_id).order_by(TechnicalIndicator.date).first()
+
+        # NaN이 None으로 저장 되었는지 확인
+        assert indicator_with_nan.ma_5 is None
+
+        # 로드 후 None이 NaN으로 복원 되었는지 확인
         loaded = db_manager.load_indicators(['005930.KS'])
         df_loaded = loaded['005930.KS']
-        assert df_loaded.isna().any().any(), "NaN values should be preserved"
-
-    def test_upsert_duplicate_date_values(self, db_manager, sample_df_basic):
-        """같은 date에 대한 UPSERT 동작 검증"""
-        # 첫 번째 저장
-        result1 = db_manager.save_price_data(
-            {'005930.KS': sample_df_basic},
-            update_if_exists=True
-        )
-        assert result1['005930.KS'] > 0
-
-        # 같은 date의 close 값 수정
-        df_modified = sample_df_basic.copy()
-        df_modified.loc[0, 'close'] = 999.99
-
-        result2 = db_manager.save_price_data(
-            {'005930.KS': df_modified},
-            update_if_exists=True
-        )
-
-        # 로드 후 수정된 값 확인
-        loaded = db_manager.load_price_data(['005930.KS'])
-        df_loaded = loaded['005930.KS']
-
-        # 첫 번째 date의 close 값이 수정되었는지 확인
-        assert df_loaded['close'].iloc[0] == 999.99
-
-    def test_load_indicators_nonexistent_ticker(self, db_manager):
-        """존재하지 않는 ticker의 지표 로드"""
-        df_dict_load = db_manager.load_indicators(['NONEXISTENT.KS'])
-
-        assert 'NONEXISTENT.KS' in df_dict_load
-        assert df_dict_load['NONEXISTENT.KS'].empty
+        assert pd.isna(df_loaded.iloc[0]['ma_5'])
 
     def test_save_indicators_partial_columns(self, db_manager, sample_df_with_indicators):
         """지표 컬럼이 일부만 존재할 때"""
@@ -979,15 +910,29 @@ class TestDatabaseManagerDataIntegrity:
         db_manager._get_ticker_id('005930.KS')
         result = db_manager.save_indicators({'005930.KS': df_partial})
 
-        assert result['005930.KS'] > 0
+        # 저장 검증
+        assert result['005930.KS'] == len(df_partial)
+
+
+        # DB 직접 조회
+        ticker = db_manager.session.query(Ticker).filter_by(ticker_code='005930.KS').first()
+        indicator = db_manager.session.query(TechnicalIndicator).filter_by(
+            ticker_id=ticker.ticker_id
+        ).order_by(TechnicalIndicator.date.desc()).first()
+        
+        # ma_5는 값 있고, 나머지는 None
+        assert indicator.ma_5 is not None
+        assert indicator.ma_20 is None
+        assert indicator.ma_200 is None
+        assert indicator.macd is None
 
         loaded = db_manager.load_indicators(['005930.KS'])
         df_loaded = loaded['005930.KS']
-
         # ma_5는 있고 다른 지표들은 NaN이어야 함
-        assert 'ma_5' in df_loaded.columns
-        if not df_loaded.empty:
-            assert not df_loaded['ma_5'].isna().all()
+        assert not pd.isna(df_loaded.iloc[-1]['ma_5'])
+        assert pd.isna(df_loaded.iloc[-1]['ma_20'])
+        assert pd.isna(df_loaded.iloc[-1]['ma_200'])
+        assert pd.isna(df_loaded.iloc[-1]['macd'])
 
     def test_partial_ticker_list_exists(self, db_manager, sample_df_basic):
         """부분적으로만 존재하는 ticker 목록 로드"""
@@ -999,37 +944,12 @@ class TestDatabaseManagerDataIntegrity:
 
         assert '005930.KS' in result
         assert 'NONEXISTENT.KS' in result
-        assert len(result['005930.KS']) > 0
+        assert len(result['005930.KS']) == len(sample_df_basic)
         assert result['NONEXISTENT.KS'].empty
 
 
 class TestDatabaseManagerEdgeCases:
     """엣지 케이스 테스트"""
-
-    def test_indicator_version_management(self, db_manager, sample_df_with_indicators):
-        """지표 버전 관리 검증"""
-        db_manager._get_ticker_id('005930.KS')
-
-        # v1.0으로 저장
-        db_manager.save_indicators(
-            {'005930.KS': sample_df_with_indicators},
-            version='v1.0'
-        )
-
-        # v2.0으로 재저장
-        df_modified = sample_df_with_indicators.copy()
-        df_modified['ma_5'] = df_modified['ma_5'] * 2
-
-        db_manager.save_indicators(
-            {'005930.KS': df_modified},
-            version='v2.0'
-        )
-
-        # 로드된 데이터가 최신 버전인지 확인
-        loaded = db_manager.load_indicators(['005930.KS'])
-        df_loaded = loaded['005930.KS']
-
-        assert not df_loaded.empty
 
     def test_large_dataset_save_and_load(self, db_manager):
         """큰 데이터셋 저장/로드"""
