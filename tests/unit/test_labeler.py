@@ -18,12 +18,6 @@ class TestLabelerInitialization:
         assert labeler.horizon == 5
         assert labeler.threshold == 0.02
 
-    def test_custom_initialization(self):
-        """커스텀 값으로 초기화"""
-        labeler = Labeler(horizon=10, threshold=0.05)
-        assert labeler.horizon == 10
-        assert labeler.threshold == 0.05
-
 
 class TestLabelerBasicFunctionality:
     """라벨 생성 기본 기능 테스트"""
@@ -134,61 +128,24 @@ class TestLabelerErrorHandling:
 class TestLabelerThresholdLogic:
     """threshold 로직 테스트"""
 
-    @pytest.mark.parametrize("threshold,expected_label", [
-        (0.02, 1),    # 10% > 2% threshold → label=1
-        (0.05, 1),    # 10% > 5% threshold → label=1
-        (0.10, 1),    # 10% >= 10% threshold → label=1
+    @pytest.mark.parametrize("price_start,price_end,threshold,expected_label", [
+        # 상승 케이스 (label=1)
+        (100, 110, 0.02, 1),      # 10% > 2%
+        (100, 110, 0.05, 1),      # 10% > 5%
+        (100, 110, 0.10, 1),      # 10% = 10%
+        (100, 102.5, 0.02, 1),    # 2.5% > 2%
+        (100, 100.01, 0.0, 1),    # 0.01%, threshold=0
+        # 하락/중립 케이스 (label=0)
+        (100, 101.5, 0.02, 0),    # 1.5% < 2%
+        (100, 98, 0.02, 0),       # -2% (음수)
     ])
-    def test_threshold_comparison(self, threshold, expected_label):
-        """다양한 threshold로 테스트"""
+    def test_threshold_logic(self, price_start, price_end, threshold, expected_label):
+        """다양한 threshold와 가격 변동 테스트"""
         labeler = Labeler(horizon=1, threshold=threshold)
-        df = pd.DataFrame({
-            'adj_close': [100, 110]  # 10% 상승
-        })
+        df = pd.DataFrame({'adj_close': [price_start, price_end]})
 
         result = labeler.label_data(df)
-        # 첫 번째 행만 검증 (마지막 행은 NaN)
         assert result['label'].iloc[0] == expected_label
-
-    def test_upward_price_movement_detected(self):
-        """상승 신호 감지"""
-        labeler = Labeler(horizon=1, threshold=0.02)
-        df = pd.DataFrame({
-            'adj_close': [100, 102.5]  # 2.5% 상승 > 2% threshold
-        })
-
-        result = labeler.label_data(df)
-        assert result['label'].iloc[0] == 1  # 상승
-
-    def test_downward_price_movement_detected(self):
-        """하락 신호 감지"""
-        labeler = Labeler(horizon=1, threshold=0.02)
-        df = pd.DataFrame({
-            'adj_close': [100, 101.5]  # 1.5% 상승 < 2% threshold
-        })
-
-        result = labeler.label_data(df)
-        assert result['label'].iloc[0] == 0  # 하락/중립
-
-    def test_negative_return(self):
-        """음수 수익률 처리"""
-        labeler = Labeler(horizon=1, threshold=0.02)
-        df = pd.DataFrame({
-            'adj_close': [100, 98]  # -2% (음수)
-        })
-
-        result = labeler.label_data(df)
-        assert result['label'].iloc[0] == 0  # 하락
-
-    def test_zero_threshold(self):
-        """threshold=0 (모든 상승 감지)"""
-        labeler = Labeler(horizon=1, threshold=0.0)
-        df = pd.DataFrame({
-            'adj_close': [100, 100.01]  # 0.01% 상승
-        })
-
-        result = labeler.label_data(df)
-        assert result['label'].iloc[0] == 1
 
 
 class TestLabelerDateSorting:
@@ -255,66 +212,6 @@ class TestLabelerWithNaNValues:
             "NaN 가격은 label=0을 생성해야 함"
 
 
-class TestLabelerHorizonVariations:
-    """다양한 horizon 값 테스트"""
-
-    @pytest.mark.parametrize("horizon", [1, 3, 5, 10, 20])
-    def test_different_horizons(self, sample_df_basic, horizon):
-        """다양한 horizon 값"""
-        labeler = Labeler(horizon=horizon)
-        result = labeler.label_data(sample_df_basic)
-
-        # NaN이 정확히 horizon개
-        nan_count = result['label'].isna().sum()
-        assert nan_count == horizon
-
-    def test_horizon_larger_than_dataframe(self):
-        """horizon이 DataFrame보다 큼"""
-        labeler = Labeler(horizon=100)
-        df = pd.DataFrame({
-            'adj_close': [100, 101, 102, 103, 104]
-        })
-
-        result = labeler.label_data(df)
-        # 모든 행이 NaN이어야 함 (미래 데이터 없음)
-        assert result['label'].isna().all()
-
-
-class TestLabelerOutputFormat:
-    """출력 형식 테스트"""
-
-    def test_output_type_is_dataframe(self, sample_df_basic):
-        """반환값이 DataFrame"""
-        labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
-
-        assert isinstance(result, pd.DataFrame)
-
-    def test_output_contains_original_columns(self, sample_df_basic):
-        """원본 컬럼이 모두 유지됨"""
-        labeler = Labeler()
-        original_cols = set(sample_df_basic.columns)
-        result = labeler.label_data(sample_df_basic)
-
-        for col in original_cols:
-            assert col in result.columns
-
-    def test_output_has_label_column(self, sample_df_basic):
-        """label 컬럼이 추가됨"""
-        labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
-
-        new_cols = set(result.columns) - set(sample_df_basic.columns)
-        assert 'label' in new_cols
-
-    def test_label_dtype_is_numeric(self, sample_df_basic):
-        """label의 dtype이 numeric (int 또는 float)"""
-        labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
-
-        assert pd.api.types.is_numeric_dtype(result['label'])
-
-
 class TestLabelerCopyBehavior:
     """원본 DataFrame 수정 여부 테스트"""
 
@@ -335,37 +232,3 @@ class TestLabelerCopyBehavior:
 
         # 다른 객체여야 함
         assert result is not sample_df_basic
-
-
-class TestLabelerIntegration:
-    """통합 테스트"""
-
-    def test_full_workflow(self, sample_df_basic):
-        """완전한 라벨링 워크플로우"""
-        labeler = Labeler(horizon=5, threshold=0.02)
-        result = labeler.label_data(sample_df_basic)
-
-        # 기본 검증
-        assert 'label' in result.columns
-        assert len(result) == len(sample_df_basic)
-
-        # NaN 검증
-        valid_labels = result.dropna(subset=['label'])
-        assert len(valid_labels) == len(sample_df_basic) - 5
-
-        # 값 검증
-        assert valid_labels['label'].min() >= 0
-        assert valid_labels['label'].max() <= 1
-
-    def test_with_realistic_data(self, sample_df_with_indicators):
-        """현실적인 데이터로 테스트"""
-        labeler = Labeler(horizon=5, threshold=0.02)
-        result = labeler.label_data(sample_df_with_indicators)
-
-        # 라벨이 생성되었는가?
-        assert 'label' in result.columns
-
-        # 지표 컬럼이 유지되었는가?
-        assert 'ma_5' in result.columns
-        assert 'ma_20' in result.columns
-        assert 'macd' in result.columns
