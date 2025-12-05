@@ -1,0 +1,154 @@
+# ==========================================
+# 🔷 데이터 파이프라인 설정
+# ==========================================
+data:
+  database_path: "data/database/stocks.db"
+  tickers:
+    - "005930.KS"    # 삼성전자
+    - "000660.KS"    # SK하이닉스
+    - "051910.KS"    # LG화학
+  exchanges:
+  period:
+  start_date: "2020-01-01"
+  end_date: "2023-12-31"
+  update_if_exists: true
+  interval: "1d"
+
+# ==========================================
+# 🔷 지표 계산 설정
+# ==========================================
+indicators:
+  list:
+    - "ma_5"
+    - "ma_10"
+    - "ma_20"
+    - "ma_50"
+    - "ma_60"
+    - "ma_100"
+    - "ma_120"
+    - "ma_200"
+    - "macd"
+    - "macd_hist"
+    - "macd_signal"
+    - "rsi"
+    - "bb_upper"
+    - "bb_mid"
+    - "bb_lower"
+    - "bb_pct"
+    - "atr"
+    - "hv"
+    - "obv"
+  version: "v1.0"
+  lookback:
+    enabled: true
+
+# ==========================================
+# 🔷 배치 처리 설정
+# ==========================================
+batch:
+  size: 100
+
+fetcher:
+  max_workers: 5
+  max_retries: 3
+
+# ==========================================
+# 🔶 모델 학습 설정
+# ==========================================
+model:
+  training:
+    tickers:
+      - "005930.KS"
+      - "000660.KS"
+      - "051910.KS"
+    period:
+    start_date: "2020-01-01"
+    end_date: "2023-12-31"
+
+  labeling:
+    horizon: 5
+    threshold: 0.02
+
+  features:
+    columns:
+      - 'ma_5'
+      - 'ma_10'
+      - 'ma_20'
+      - 'ma_50'
+      - 'ma_60'
+      - 'ma_100'
+      - 'ma_120'
+      - 'ma_200'
+      - 'macd'
+      - 'macd_signal'
+      - 'macd_hist'
+    indicators:
+      - 'ma_5'
+      - 'ma_10'
+      - 'ma_20'
+      - 'ma_50'
+      - 'ma_60'
+      - 'ma_100'
+      - 'ma_120'
+      - 'ma_200'
+      - 'macd'
+      - 'macd_signal'
+      - 'macd_hist'
+
+  output:
+    dir: "models"
+    file: "momentum_model.pkl"
+
+# ==========================================
+# 🔶 백테스트 설정 (NEW)
+# ==========================================
+backtest:
+  # 백테스트 대상 종목 (model.training.tickers와 동일하게 유지 권장)
+  tickers:
+    - "005930.KS"
+    - "000660.KS"
+    - "051910.KS"
+  
+  # 백테스트 기간
+  start_date: "2023-01-01"
+  end_date: "2023-12-31"
+  
+  # 초기 자본금
+  initial_cash: 100000000  # 1억원
+  
+  # 전략 파라미터
+  strategy:
+    holding_period: 5       # 보유 기간 (일)
+    
+    # 손절 설정
+    use_stop_loss: false
+    stop_loss_pct: 0.05     # 5%
+    
+    # 익절 설정
+    use_take_profit: false
+    take_profit_pct: 0.10   # 10%
+    
+    # 최대 동시 포지션 (null = 제한 없음)
+    max_positions: null
+  
+  # 거래 비용
+  commission: 0.00015       # 0.015% (키움증권 기준)
+  slippage: 0.001           # 0.1%
+  
+  # 모델 경로
+  model_path: "models/momentum_model.pkl"
+  
+  # 벤치마크 비교 여부
+  compare_benchmark: true
+  
+  # 출력 설정
+  output:
+    plot: false
+    plot_path: "output/backtest_chart.png"
+    csv_path: "output/backtest_results.csv"
+
+# ==========================================
+# 공통 설정
+# ==========================================
+logging:
+  level: "INFO"
