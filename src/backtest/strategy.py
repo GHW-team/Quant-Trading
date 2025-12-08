@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import backtrader as bt
 
 logger = logging.getLogger(__name__)
-
+_REQUIRED = object()
 
 class MLSignalStrategy(bt.Strategy):
     """
@@ -32,15 +32,15 @@ class MLSignalStrategy(bt.Strategy):
     """
     
     params = (
-        ('holding_period', 5),
-        ('equal_weight', None),  # None이면 자동 계산
-        ('use_stop_loss', False),
-        ('stop_loss_pct', 0.05),
-        ('use_take_profit', False),
-        ('take_profit_pct', 0.10),
-        ('max_positions', None),
-        ('commission_pct', 0.00015),
-        ('printlog', True),
+        ('holding_period', _REQUIRED),
+        ('equal_weight', _REQUIRED),  
+        ('use_stop_loss', _REQUIRED),
+        ('stop_loss_pct', _REQUIRED),
+        ('use_take_profit', _REQUIRED),
+        ('take_profit_pct', _REQUIRED),
+        ('max_positions', _REQUIRED),
+        ('commission_pct', _REQUIRED),
+        ('printlog', _REQUIRED),
     )
     
     def __init__(self):
@@ -68,6 +68,28 @@ class MLSignalStrategy(bt.Strategy):
         
         logger.info(f"Strategy initialized: {num_assets} assets, "
                    f"weight={self.weight:.2%}, holding={self.params.holding_period}d")
+        
+        #입력 파라미터 검증
+        self._check_required_params()
+
+    def _check_required_params(self):
+        """필수 파라미터가 입력되었는지 검증"""
+        missing_params = []
+
+        for p_name in self.params._getkeys():
+            val = getattr(self.params,p_name)
+
+            if val is _REQUIRED:
+                missing_params.append(p_name)
+        
+        if missing_params:
+            raise ValueError(
+                f"\n{'='*40}\n"
+                f"🛑 전략 설정 오류 ({self.__class__.__name__})\n"
+                f"필수 파라미터 누락: '{missing_params}'.\n"
+                f"cerebro.addstrategy() 호출 시 값을 전달해주세요.\n"
+                f"{'='*40}"
+            )
     
     def log(self, txt: str, dt=None):
         """로그 출력"""

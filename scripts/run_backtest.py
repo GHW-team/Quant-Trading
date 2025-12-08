@@ -20,6 +20,8 @@ from src.backtest.strategy import MLSignalStrategy, BuyAndHoldStrategy
 from src.data.db_manager import DatabaseManager
 from src.ml.logistic_regression import LogisticRegressionHandler
 
+CONFIG_PATH = "/app/config/backtest.yaml"
+
 
 # ============================================
 # 로깅 설정
@@ -48,22 +50,16 @@ def load_config(config_path: str = "config/config.yaml") -> Dict[str, Any]:
 # ML 신호 생성
 # ============================================
 def generate_ml_signals(
+    df_dict: Dict[str,pd.DataFrame],
     model_path: str,
-    db_path: str,
-    ticker_codes: List[str],
-    start_date: str,
-    end_date: str,
-    feature_columns: List[str],
 ) -> Dict[str, pd.Series]:
     """
     학습된 ML 모델로 매수 신호 생성
     
     Args:
-        model_path: 저장된 모델 경로
-        db_path: 데이터베이스 경로
-        ticker_codes: 종목 코드 리스트
-        start_date: 시작일
-        end_date: 종료일
+        df_dict: Dict[ticker, df of ticker]
+            티커와 그 티커에 대한 feature값들이 포함된 DataFrame
+        model_path: 모델 파일 경로
         feature_columns: 피처 컬럼 리스트
     
     Returns:
@@ -85,42 +81,22 @@ def generate_ml_signals(
         logger.error(f"모델 로드 실패: {e}")
         return signals
     
-    # 데이터 로드 및 예측
-    with DatabaseManager(db_path=db_path) as db:
-        # 가격 데이터 로드
-        price_dict = db.load_price_data(
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        
-        # 지표 데이터 로드
-        indicator_dict = db.load_indicators(
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-        )
-    
-    for ticker in ticker_codes:
+    #피쳐 컬럼 불러오기
+    feature_columns = handler.feature_names
+
+    #티커리스트 불러오기
+    ticker_list = df_dict.keys()
+    for ticker in ticker_list:
         try:
-            price_df = price_dict.get(ticker)
-            indicator_df = indicator_dict.get(ticker)
-            
-            if price_df is None or price_df.empty:
-                logger.warning(f"{ticker}: 가격 데이터 없음")
-                continue
-            
-            # 가격 + 지표 병합
-            df = price_df.copy()
-            if indicator_df is not None and not indicator_df.empty:
-                df = pd.merge(df, indicator_df, on='date', how='left')
-            
+            df = df_dict[ticker]
+
             # 피처 컬럼 확인
             available_features = [c for c in feature_columns if c in df.columns]
-            if len(available_features) < len(feature_columns):
-                missing = set(feature_columns) - set(available_features)
-                logger.warning(f"{ticker}: 누락된 피처 {missing}")
-                continue
+            if set(available_features) != set(feature_columns):
+                missing_columns = set(feature_columns) - set(available_features)
+                raise ValueError(
+                    f"{missing_columns} columns should be in DataFrame(df_dict)"
+                )
             
             # NaN 제거 (예측에 필요)
             df_clean = df.dropna(subset=feature_columns)
@@ -155,96 +131,27 @@ def generate_ml_signals(
 
 
 # ============================================
-# CLI 파서
+# DB에서 DataFrame 로드
 # ============================================
-def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="ML 퀀트 트레이딩 백테스트 실행기",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-예시:
-  # 기본 실행 (config.yaml 사용)
-  python scripts/run_backtest.py
-  
-  # 종목/기간 지정
-  python scripts/run_backtest.py --tickers 005930.KS 000660.KS 051910.KS \\
-                                  --start-date 2023-01-01 --end-date 2023-12-31
-  
-  # 손절/익절 설정
-  python scripts/run_backtest.py --stop-loss 0.05 --take-profit 0.10
-  
-  # 벤치마크 비교
-  python scripts/run_backtest.py --compare-benchmark
-        """
-    )
-    
-    # 종목/기간
-    parser.add_argument("--tickers", nargs="+", 
-                       help="종목 코드 (예: 005930.KS 000660.KS)")
-    parser.add_argument("--start-date", help="시작일 (YYYY-MM-DD)")
-    parser.add_argument("--end-date", help="종료일 (YYYY-MM-DD)")
-    
-    # 전략 파라미터
-    parser.add_argument("--holding-period", type=int, default=5,
-                       help="보유 기간 (기본: 5일)")
-    parser.add_argument("--initial-cash", type=float, default=100_000_000,
-                       help="초기 자본금 (기본: 1억원)")
-    parser.add_argument("--commission", type=float, default=0.00015,
-                       help="거래 수수료 (기본: 0.015%%)")
-    
-    # 손절/익절
-    parser.add_argument("--stop-loss", type=float,
-                       help="손절 비율 (예: 0.05 = 5%%)")
-    parser.add_argument("--take-profit", type=float,
-                       help="익절 비율 (예: 0.10 = 10%%)")
-    
-    # 모델
-    parser.add_argument("--model-path", default="models/momentum_model.pkl",
-                       help="학습된 모델 경로")
-    parser.add_argument("--no-model", action="store_true",
-                       help="모델 사용 안함 (Buy & Hold)")
-    
-    # 벤치마크
-    parser.add_argument("--compare-benchmark", action="store_true",
-                       help="Buy & Hold 벤치마크와 비교")
-    
-    # 출력
-    parser.add_argument("--plot", action="store_true",
-                       help="차트 출력")
-    parser.add_argument("--plot-path", 
-                       help="차트 저장 경로 (예: output/backtest.png)")
-    parser.add_argument("--output-csv",
-                       help="결과 CSV 저장 경로")
-    
-    # 기타
-    parser.add_argument("--config", default="config/config.yaml",
-                       help="설정 파일 경로")
-    parser.add_argument("--log-level", default="INFO",
-                       choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    
-    return parser
-
 
 # ============================================
 # 메인 실행
 # ============================================
 def main():
-    parser = create_parser()
-    args = parser.parse_args()
-    
-    logger = setup_logging(args.log_level)
-    
     # Config 로드
-    config = load_config(args.config)
+    config = load_config(CONFIG_PATH)
     data_cfg = config.get('data', {})
     model_cfg = config.get('model', {})
+
+    #로그 설정
+    logger = setup_logging(config.get('log_level'))
     
     # 파라미터 결정 (CLI > config > 기본값)
-    ticker_codes = args.tickers or model_cfg.get('training', {}).get('tickers', 
+    ticker_codes = model_cfg.get('training', {}).get('tickers', 
                    data_cfg.get('tickers', ['005930.KS', '000660.KS', '051910.KS']))
     
-    start_date = args.start_date or model_cfg.get('training', {}).get('start_date', '2023-01-01')
-    end_date = args.end_date or model_cfg.get('training', {}).get('end_date', '2023-12-31')
+    start_date = model_cfg.get('training', {}).get('start_date', '2023-01-01')
+    end_date = model_cfg.get('training', {}).get('end_date', '2023-12-31')
     
     db_path = data_cfg.get('database_path', 'data/database/stocks.db')
     
@@ -264,6 +171,8 @@ def main():
     logger.info(f"수수료: {args.commission:.4%}")
     
     try:
+        # ============ DataFrame 로드 =============
+
         # ============ ML 신호 생성 ============
         signals = None
         strategy_class = MLSignalStrategy
