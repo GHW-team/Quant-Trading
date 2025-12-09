@@ -9,7 +9,7 @@ data:
     - "051910.KS"    # LG화학
   start_date: "2020-01-01"
   end_date: "2023-12-31"
-  #백테스트 과정에 쓰이는 모든 지표 리스트 (가격 제외)
+  #백테스트 과정에 쓰이는 모든 지표 리스트 (OHLCV 제외)
   indicator_list:
     - "ma_5"
     - "ma_10"
@@ -46,7 +46,7 @@ backtest:
     initial_cash: 100000000  # 1억원
     # 거래 비용
     commission: 0.00015       # 0.015% (키움증권 기준)
-    slippage: 0.001           # 0.1%
+    slippage: 0.0025           # 0.25% (종가 오차 포함)
     leverage: 1.0             # 없음
 
   # 전략 파라미터

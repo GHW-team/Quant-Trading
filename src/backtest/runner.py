@@ -72,20 +72,27 @@ class BacktestRunner:
         백테스트 실행
         
         Args:
+            df_dict: {종목코드: 종목정도(데이터프레임)}
+                -df = OHLCV + 지표 + ML신호
+                -'date'는 컬럼.
             strategy_class: 전략 클래스 (기본: MLSignalStrategy)
             strategy_params: 전략 파라미터 딕셔너리
-            plot: 차트 출력 여부
             plot_path: 차트 저장 경로 (None이면 화면 출력)
         
         Returns:
             PerformanceMetrics 객체
         """
         ticker_codes = df_dict.keys()
+        first_df = next(iter(df_dict.values()))
+        start_date = first_df.index.min().strftime('%Y-%m-%d')
+        end_date = first_df.index.max().strftime('%Y-%m-%d')
+        
 
         logger.info(f"\n{'='*60}")
         logger.info("🚀 백테스트 시작")
         logger.info(f"{'='*60}")
         logger.info(f"종목: {ticker_codes}")
+        logger.info(f"기간: {start_date} ~ {end_date}")
         logger.info(f"초기 자본: {self.initial_cash:,.0f}")
         logger.info(f"수수료: {self.commission:.4%}, 슬리피지: {self.slippage:.3%}")
         
@@ -104,6 +111,9 @@ class BacktestRunner:
             slip_match=True,
             slip_out=False,
         )
+
+        # 종가로 강제 주문 체결
+        self.cerebro.broker.set_coc(True)
         
         # ============ 2. 데이터 피드 추가 ============
         logger.info("\n📊 데이터 로딩 중...")

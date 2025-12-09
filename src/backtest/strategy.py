@@ -42,6 +42,9 @@ class MLSignalStrategy(bt.Strategy):
     )
     
     def __init__(self):
+        #입력 파라미터 검증
+        self._check_required_params()
+
         # 종목별 보유일 카운터: {data_name: 매수 후 경과일}
         self.holding_days = defaultdict(int)
         
@@ -66,9 +69,6 @@ class MLSignalStrategy(bt.Strategy):
         
         logger.info(f"Strategy initialized: {num_assets} assets, "
                    f"weight={self.weight:.2%}, holding={self.params.holding_period}d")
-        
-        #입력 파라미터 검증
-        self._check_required_params()
 
     def _check_required_params(self):
         """필수 파라미터가 입력되었는지 검증"""

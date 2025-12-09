@@ -78,6 +78,7 @@ def create_feeds_from_dataframe(
     
     Args:
         df_dict: {ticker: DataFrame} - OHLCV + 지표 포함
+            -'date'는 컬럼
     
     Returns:
         {ticker: DatabaseFeed} 딕셔너리
@@ -87,6 +88,11 @@ def create_feeds_from_dataframe(
     for ticker, df in df_dict.items():
         try:
             df = df.copy()
+            
+            # 빈 df 예외처리
+            if df.empty:
+                logger.warning(f"{ticker}: Empty DataFrame, skipping")
+                continue
             
             # date 처리 (인덱스화 + 정렬)
             if 'date' in df.columns:
