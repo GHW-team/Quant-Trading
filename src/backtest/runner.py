@@ -63,23 +63,15 @@ class BacktestRunner:
     
     def run(
         self,
-        ticker_codes: List[str],
-        start_date: str,
-        end_date: str,
-        signals: Optional[Dict[str, pd.Series]] = None,
-        strategy_class: Type[bt.Strategy] = MLSignalStrategy,
-        strategy_params: Optional[Dict[str, Any]] = None,
-        plot: bool = True,
+        df_dict: Dict[str,pd.DataFrame],
+        strategy_class: Type[bt.Strategy],
+        strategy_params: Dict[str, Any],
         plot_path: Optional[str] = "data/backtest/plot",
     ) -> PerformanceMetrics:
         """
         백테스트 실행
         
         Args:
-            ticker_codes: 종목 코드 리스트
-            start_date: 시작일 (YYYY-MM-DD)
-            end_date: 종료일 (YYYY-MM-DD)
-            signals: ML 예측 신호 {ticker: pd.Series(index=date, values=0/1)}
             strategy_class: 전략 클래스 (기본: MLSignalStrategy)
             strategy_params: 전략 파라미터 딕셔너리
             plot: 차트 출력 여부
@@ -88,11 +80,12 @@ class BacktestRunner:
         Returns:
             PerformanceMetrics 객체
         """
+        ticker_codes = df_dict.keys()
+
         logger.info(f"\n{'='*60}")
         logger.info("🚀 백테스트 시작")
         logger.info(f"{'='*60}")
         logger.info(f"종목: {ticker_codes}")
-        logger.info(f"기간: {start_date} ~ {end_date}")
         logger.info(f"초기 자본: {self.initial_cash:,.0f}")
         logger.info(f"수수료: {self.commission:.4%}, 슬리피지: {self.slippage:.3%}")
         
@@ -115,12 +108,8 @@ class BacktestRunner:
         # ============ 2. 데이터 피드 추가 ============
         logger.info("\n📊 데이터 로딩 중...")
         
-        feeds = create_feeds_from_db(
-            db_path=self.db_path,
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-            signals=signals,
+        feeds = create_feeds_from_dataframe(
+            df_dict=df_dict,
         )
         
         if not feeds:
@@ -131,19 +120,10 @@ class BacktestRunner:
             logger.info(f"  ✓ {ticker} 데이터 추가")
         
         # ============ 3. 전략 추가 ============
-        strategy_params = strategy_params or {}
-        
-        # 기본 파라미터 설정
-        default_params = {
-            'holding_period': 5,
-            'commission_pct': self.commission,
-            'printlog': True,
-        }
-        default_params.update(strategy_params)
-        
-        self.cerebro.addstrategy(strategy_class, **default_params)
+        self.cerebro.addstrategy(strategy_class, **strategy_params)
+
         logger.info(f"\n📈 전략: {strategy_class.__name__}")
-        logger.info(f"  파라미터: {default_params}")
+        logger.info(f"  파라미터: {strategy_params}")
         
         # ============ 4. 분석기 추가 ============
         PerformanceAnalyzer.add_analyzers(self.cerebro)
@@ -167,20 +147,16 @@ class BacktestRunner:
         
         logger.info(self.metrics.summary())
         
-        # ============ 7. 차트 출력 (옵션) ============
-        if plot:
-            self._plot(plot_path)
+        # ============ 7. 차트 출력 ============
+        self._plot(plot_path)
         
         return self.metrics
     
     def run_with_benchmark(
         self,
-        ticker_codes: List[str],
-        start_date: str,
-        end_date: str,
-        signals: Optional[Dict[str, pd.Series]] = None,
-        strategy_class: Type[bt.Strategy] = MLSignalStrategy,
-        strategy_params: Optional[Dict[str, Any]] = None,
+        df_dict: Dict[str,pd.DataFrame],
+        strategy_class: Type[bt.Strategy],
+        strategy_params: Dict[str, Any],
     ) -> Dict[str, PerformanceMetrics]:
         """
         전략과 벤치마크(Buy & Hold) 비교 실행
@@ -195,10 +171,7 @@ class BacktestRunner:
         logger.info("📈 ML 전략 백테스트")
         logger.info("="*60)
         results['strategy'] = self.run(
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-            signals=signals,
+            df_dict=df_dict,
             strategy_class=strategy_class,
             strategy_params=strategy_params,
         )
@@ -208,12 +181,9 @@ class BacktestRunner:
         logger.info("📊 벤치마크 (Buy & Hold) 백테스트")
         logger.info("="*60)
         results['benchmark'] = self.run(
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-            signals=None,  # 신호 없이 단순 보유
+            df_dict=df_dict,
             strategy_class=BuyAndHoldStrategy,
-            strategy_params={'printlog': True},
+            strategy_params=strategy_params,
         )
         
         # 비교 출력
@@ -282,111 +252,3 @@ class BacktestRunner:
                 
         except Exception as e:
             logger.warning(f"차트 생성 실패: {e}")
-
-
-def run_backtest(
-    db_path: str,
-    ticker_codes: List[str],
-    start_date: str,
-    end_date: str,
-    signals: Optional[Dict[str, pd.Series]] = None,
-    initial_cash: float = 100_000_000,
-    holding_period: int = 5,
-    commission: float = 0.00015,
-    use_stop_loss: bool = False,
-    stop_loss_pct: float = 0.05,
-    use_take_profit: bool = False,
-    take_profit_pct: float = 0.10,
-    compare_benchmark: bool = True,
-) -> PerformanceMetrics:
-    """
-    백테스트 편의 함수
-    
-    Args:
-        db_path: 데이터베이스 경로
-        ticker_codes: 종목 코드 리스트
-        start_date: 시작일
-        end_date: 종료일
-        signals: ML 예측 신호
-        initial_cash: 초기 자본금
-        holding_period: 보유 기간 (일)
-        commission: 수수료
-        use_stop_loss: 손절 사용 여부
-        stop_loss_pct: 손절 비율
-        use_take_profit: 익절 사용 여부
-        take_profit_pct: 익절 비율
-        compare_benchmark: 벤치마크 비교 여부
-    
-    Returns:
-        PerformanceMetrics 객체
-    """
-    runner = BacktestRunner(
-        db_path=db_path,
-        initial_cash=initial_cash,
-        commission=commission,
-    )
-    
-    strategy_params = {
-        'holding_period': holding_period,
-        'use_stop_loss': use_stop_loss,
-        'stop_loss_pct': stop_loss_pct,
-        'use_take_profit': use_take_profit,
-        'take_profit_pct': take_profit_pct,
-    }
-    
-    if compare_benchmark:
-        results = runner.run_with_benchmark(
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-            signals=signals,
-            strategy_params=strategy_params,
-        )
-        return results['strategy']
-    else:
-        return runner.run(
-            ticker_codes=ticker_codes,
-            start_date=start_date,
-            end_date=end_date,
-            signals=signals,
-            strategy_params=strategy_params,
-        )
-
-
-# ============ CLI용 메인 ============
-if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-    
-    # 프로젝트 루트 추가
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]
-    sys.path.insert(0, str(PROJECT_ROOT))
-    
-    logging.basicConfig(level=logging.INFO)
-    
-    print("\n" + "="*70)
-    print("BacktestRunner 테스트")
-    print("="*70)
-    
-    # 테스트 실행
-    try:
-        runner = BacktestRunner(
-            db_path='data/database/stocks.db',
-            initial_cash=100_000_000,
-        )
-        
-        # 간단한 테스트 (신호 없이 Buy & Hold)
-        metrics = runner.run(
-            ticker_codes=['005930.KS'],
-            start_date='2024-01-01',
-            end_date='2024-06-30',
-            signals=None,
-            strategy_class=BuyAndHoldStrategy,
-        )
-        
-        print(metrics.summary())
-        
-    except Exception as e:
-        print(f"테스트 실패: {e}")
-        import traceback
-        traceback.print_exc()

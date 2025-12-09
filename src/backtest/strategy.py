@@ -273,7 +273,7 @@ class BuyAndHoldStrategy(bt.Strategy):
     def __init__(self):
         self.bought = False
         self.weight = 1.0 / len(self.datas) if len(self.datas) > 0 else 1.0
-    
+
     def log(self, txt: str, dt=None):
         if self.params.printlog:
             dt = dt or self.datas[0].datetime.date(0)

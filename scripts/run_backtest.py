@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.backtest.runner import BacktestRunner, run_backtest
+from src.backtest.runner import BacktestRunner
 from src.backtest.strategy import MLSignalStrategy, BuyAndHoldStrategy
 from src.data.db_manager import DatabaseManager
 from src.ml.logistic_regression import LogisticRegressionHandler
