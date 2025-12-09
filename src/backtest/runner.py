@@ -24,13 +24,15 @@ class BacktestRunner:
         runner = BacktestRunner(
             db_path='data/database/stocks.db',
             initial_cash=100_000_000,
+            commission=0.00015,
+            slippage=0.001,
         )
         
         metrics = runner.run(
             ticker_codes=['005930.KS', '000660.KS', '051910.KS'],
-            start_date='2023-01-01',
-            end_date='2023-12-31',
-            signals=predicted_signals,  # ML 모델 예측 결과
+            df_dict = df_dict,
+            strategy_class=strategy_class,
+            strategy_params=strategy_params,
         )
         
         print(metrics.summary())
@@ -38,17 +40,17 @@ class BacktestRunner:
     
     def __init__(
         self,
+        initial_cash: float,
+        commission: float,
+        slippage: float,
         db_path: str = 'data/database/stocks.db',
-        initial_cash: float = 100_000_000,
-        commission: float = 0.00015,
-        slippage: float = 0.001,
     ):
         """
         Args:
             db_path: 데이터베이스 경로
-            initial_cash: 초기 자본금 (기본 1억원)
-            commission: 거래 수수료 (기본 0.015%)
-            slippage: 슬리피지 (기본 0.1%)
+            initial_cash: 초기 자본금
+            commission: 거래 수수료
+            slippage: 슬리피지
         """
         self.db_path = db_path
         self.initial_cash = initial_cash
@@ -67,8 +69,8 @@ class BacktestRunner:
         signals: Optional[Dict[str, pd.Series]] = None,
         strategy_class: Type[bt.Strategy] = MLSignalStrategy,
         strategy_params: Optional[Dict[str, Any]] = None,
-        plot: bool = False,
-        plot_path: Optional[str] = None,
+        plot: bool = True,
+        plot_path: Optional[str] = "data/backtest/plot",
     ) -> PerformanceMetrics:
         """
         백테스트 실행

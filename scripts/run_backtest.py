@@ -19,6 +19,7 @@ from src.backtest.runner import BacktestRunner, run_backtest
 from src.backtest.strategy import MLSignalStrategy, BuyAndHoldStrategy
 from src.data.db_manager import DatabaseManager
 from src.ml.logistic_regression import LogisticRegressionHandler
+from src.data.pipeline import DataPipeline
 
 CONFIG_PATH = "/app/config/backtest.yaml"
 
@@ -60,7 +61,6 @@ def generate_ml_signals(
         df_dict: Dict[ticker, df of ticker]
             티커와 그 티커에 대한 feature값들이 포함된 DataFrame
         model_path: 모델 파일 경로
-        feature_columns: 피처 컬럼 리스트
     
     Returns:
         {ticker: pd.Series(index=date, values=0/1)} 형태의 신호 딕셔너리
@@ -90,14 +90,6 @@ def generate_ml_signals(
         try:
             df = df_dict[ticker]
 
-            # 피처 컬럼 확인
-            available_features = [c for c in feature_columns if c in df.columns]
-            if set(available_features) != set(feature_columns):
-                missing_columns = set(feature_columns) - set(available_features)
-                raise ValueError(
-                    f"{missing_columns} columns should be in DataFrame(df_dict)"
-                )
-            
             # NaN 제거 (예측에 필요)
             df_clean = df.dropna(subset=feature_columns)
             
@@ -138,103 +130,120 @@ def generate_ml_signals(
 # 메인 실행
 # ============================================
 def main():
+    # ============================
+    # 변수 설정 (Config 로드)
+    # ============================
+
     # Config 로드
     config = load_config(CONFIG_PATH)
-    data_cfg = config.get('data', {})
-    model_cfg = config.get('model', {})
 
-    #로그 설정
-    logger = setup_logging(config.get('log_level'))
-    
-    # 파라미터 결정 (CLI > config > 기본값)
-    ticker_codes = model_cfg.get('training', {}).get('tickers', 
-                   data_cfg.get('tickers', ['005930.KS', '000660.KS', '051910.KS']))
-    
-    start_date = model_cfg.get('training', {}).get('start_date', '2023-01-01')
-    end_date = model_cfg.get('training', {}).get('end_date', '2023-12-31')
-    
-    db_path = data_cfg.get('database_path', 'data/database/stocks.db')
-    
-    feature_columns = model_cfg.get('features', {}).get('columns', [
-        'ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 
-        'ma_100', 'ma_120', 'ma_200', 
-        'macd', 'macd_signal', 'macd_hist'
-    ])
+    # 로그 설정
+    logger = setup_logging(config['log_level'])
+
+    # 1.데이터 로드
+    data_config = config['data']
+
+    db_path = data_config['db_path']
+    ticker_codes = data_config['ticker_codes']
+    start_date = data_config['start_date']
+    end_date = data_config['end_date']
+    indicator_list = data_config['indicator_list']
+
+    # 2.ML 신호 생성
+    ml_config = config['ml']
+
+    model_path = ml_config['model_path']
+
+    # 3.backtest 변수
+        # (1) 기본 변수
+    basic_params = config['backtest']['basic_params']
+
+    initial_cash = basic_params['initial_cash']
+    commision = basic_params['commission']
+    slippage = basic_params['slippage']
+        # (2) Strategy 전용 변수
+    strategy_params = config['backtest']['strategy_params']
+
+    #기타
+    output_csv = config['output_csv']
     
     logger.info(f"\n{'='*60}")
     logger.info("🚀 백테스트 설정")
     logger.info(f"{'='*60}")
     logger.info(f"종목: {ticker_codes}")
     logger.info(f"기간: {start_date} ~ {end_date}")
-    logger.info(f"초기 자본: {args.initial_cash:,.0f}")
-    logger.info(f"보유 기간: {args.holding_period}일")
-    logger.info(f"수수료: {args.commission:.4%}")
+    logger.info(f"초기 자본: {initial_cash:,.0f}")
+    logger.info(f"수수료: {commision:.4%}")
+    logger.info(f"슬리피지: {slippage:.4%}")
     
     try:
         # ============ DataFrame 로드 =============
+        pipeline = DataPipeline(db_path=db_path)
+        df_dict = pipeline.run_full_pipeline(
+            ticker_list=ticker_codes,
+            start_date=start_date,
+            end_date=end_date,
+            indicator_list=indicator_list,
+        )
 
         # ============ ML 신호 생성 ============
         signals = None
         strategy_class = MLSignalStrategy
         
-        if args.no_model:
-            logger.info("\n📊 모델 미사용 (Buy & Hold 전략)")
-            strategy_class = BuyAndHoldStrategy
-        else:
-            logger.info(f"\n🤖 ML 모델로 신호 생성 중...")
-            signals = generate_ml_signals(
-                model_path=args.model_path,
-                db_path=db_path,
-                ticker_codes=ticker_codes,
-                start_date=start_date,
-                end_date=end_date,
-                feature_columns=feature_columns,
-            )
+        logger.info(f"\n🤖 ML 모델로 신호 생성 중...")
+        signals = generate_ml_signals(
+            model_path=model_path,
+            df_dict=df_dict,
+        )
             
-            if not signals:
-                logger.warning("생성된 신호가 없습니다. 모든 날짜에 signal=0으로 진행합니다.")
+        if not signals:
+            logger.warning("ML신호가 생성되지 않았습니다.")
+            raise ValueError(
+                f"ML 신호 생성 과정에서 문제가 생겼습니다!!"
+            )
+
+        # ============ df와 signal 통합 =============
+        logger.info("\n🔗 DataFrame과 ML 신호 병합 중...")
+        for ticker in ticker_codes:
+            df = df_dict[ticker]
+            signal = signals.get(ticker)
+
+            # signal은 DatetimeIndex를 가진 Series
+            # df는 'date' 컬럼을 가진 DataFrame
+
+            # signal을 DataFrame으로 변환
+            signal_df = signal.reset_index()
+
+            # date 타입 맞추기
+            df['date'] = pd.to_datetime(df['date'])
+            signal_df['date'] = pd.to_datetime(signal_df['date'])
+
+            # 병합 (left join - df의 모든 날짜 유지)
+            df = pd.merge(df, signal_df, on='date', how='left')
+
+            # 업데이트된 df를 다시 저장
+            df_dict[ticker] = df
+
+        logger.info(f"{ticker}: 신호 병합 완료 ")
         
         # ============ 백테스트 실행 ============
         runner = BacktestRunner(
             db_path=db_path,
-            initial_cash=args.initial_cash,
-            commission=args.commission,
+            initial_cash=initial_cash,
+            commission=commision,
+            slippage=slippage,
         )
         
-        strategy_params = {
-            'holding_period': args.holding_period,
-            'use_stop_loss': args.stop_loss is not None,
-            'stop_loss_pct': args.stop_loss or 0.05,
-            'use_take_profit': args.take_profit is not None,
-            'take_profit_pct': args.take_profit or 0.10,
-            'printlog': args.log_level == "DEBUG",
-        }
-        
-        if args.compare_benchmark:
-            results = runner.run_with_benchmark(
-                ticker_codes=ticker_codes,
-                start_date=start_date,
-                end_date=end_date,
-                signals=signals,
-                strategy_class=strategy_class,
-                strategy_params=strategy_params,
-            )
-            metrics = results['strategy']
-        else:
-            metrics = runner.run(
-                ticker_codes=ticker_codes,
-                start_date=start_date,
-                end_date=end_date,
-                signals=signals,
-                strategy_class=strategy_class,
-                strategy_params=strategy_params,
-                plot=args.plot,
-                plot_path=args.plot_path,
-            )
+        metrics = runner.run(
+            ticker_codes=ticker_codes,
+            df_dict = df_dict,
+            strategy_class=strategy_class,
+            strategy_params=strategy_params,
+        )
         
         # ============ 결과 저장 ============
-        if args.output_csv:
-            output_path = Path(args.output_csv)
+        if output_csv:
+            output_path = Path(output_csv)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
             results_df = pd.DataFrame([metrics.to_dict()])

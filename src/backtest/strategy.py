@@ -28,7 +28,6 @@ class MLSignalStrategy(bt.Strategy):
         use_take_profit: 익절 사용 여부 - 기본값 False  
         take_profit_pct: 익절 비율 - 기본값 0.10 (10%)
         max_positions: 최대 동시 포지션 수 - 기본값 None (제한 없음)
-        commission_pct: 거래 수수료 - 기본값 0.00015 (0.015%, 키움증권 기준)
     """
     
     params = (
@@ -39,7 +38,6 @@ class MLSignalStrategy(bt.Strategy):
         ('use_take_profit', _REQUIRED),
         ('take_profit_pct', _REQUIRED),
         ('max_positions', _REQUIRED),
-        ('commission_pct', _REQUIRED),
         ('printlog', _REQUIRED),
     )
     
