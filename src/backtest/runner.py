@@ -7,6 +7,9 @@ from typing import Dict, List, Optional, Type, Any
 
 import backtrader as bt
 import pandas as pd
+import matplotlib
+#화면 차트 출력 막기
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from src.backtest.data_feed import create_feeds_from_dataframe
@@ -242,15 +245,17 @@ class BacktestRunner:
     def _plot(self, save_path: Optional[str] = None):
         """차트 출력/저장"""
         try:
+            plt.rcParams['figure.figsize'] = [14, 25]  # 가로 14인치, 세로 25인치로 설정
             # Backtrader 기본 플롯
             figs = self.cerebro.plot(
                 style='candlestick',
-                barup='red',
+                barup='lightcoral',
                 bardown='blue',
-                volup='red',
+                volup='lightcoral',
                 voldown='blue',
                 volume=True,
                 subplot=True,
+                iplot=False, 
             )
             
             if save_path:

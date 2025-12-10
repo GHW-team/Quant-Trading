@@ -66,4 +66,4 @@ isort==5.13.2                # 최신 import 정렬
 pywin32==308; sys_platform == 'win32' 
 
 #티커 크롤링
-lxml==25.3
+lxml==6.0.1
