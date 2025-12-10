@@ -22,7 +22,7 @@ class MLSignalStrategy(bt.Strategy):
     
     Parameters:
         holding_period: 보유 기간 (일) - 기본값 5
-        equal_weight: 종목당 투자 비중 - 기본값 자동 계산 (1/종목수)
+        position_weight: 종목당 투자 비중 - 기본값 자동 계산 (1/종목수)
         use_stop_loss: 손절 사용 여부 - 기본값 False
         stop_loss_pct: 손절 비율 - 기본값 0.05 (5%)
         use_take_profit: 익절 사용 여부 - 기본값 False  
@@ -32,7 +32,7 @@ class MLSignalStrategy(bt.Strategy):
     
     params = (
         ('holding_period', _REQUIRED),
-        ('equal_weight', _REQUIRED),  
+        ('position_weight', _REQUIRED),  
         ('use_stop_loss', _REQUIRED),
         ('stop_loss_pct', _REQUIRED),
         ('use_take_profit', _REQUIRED),
@@ -59,10 +59,17 @@ class MLSignalStrategy(bt.Strategy):
         
         # 동일 비중 계산
         num_assets = len(self.datas)
-        if self.params.equal_weight is None:
-            self.weight = 1.0 / num_assets if num_assets > 0 else 1.0
+        if self.params.position_weight is None:
+            #설정값이 None인 경우
+            if num_assets == 0:
+                # 0 나누기 방지
+                logger.warning(f"No data feeds available.")
+                self.weight = 1.0
+            else:
+                #동일비중
+                self.weight = 1.0 / num_assets if num_assets > 0 else 1.0
         else:
-            self.weight = self.params.equal_weight
+            self.weight = self.params.position_weight
         
         # 거래 기록
         self.trade_log = []
@@ -165,6 +172,10 @@ class MLSignalStrategy(bt.Strategy):
         for i, data in enumerate(self.datas):
             data_name = data._name
             pos = self.getposition(data)
+                
+            # ML 매수 신호 확인
+            signal = 0
+            signal = data.lines.signal[0]
             
             # 보유일 증가
             if pos.size > 0:
@@ -183,7 +194,13 @@ class MLSignalStrategy(bt.Strategy):
                 if self.holding_days[data_name] >= self.params.holding_period:
                     should_sell = True
                     sell_reason = f"HOLDING_PERIOD({self.params.holding_period}d)"
-                
+
+                    # 보유기간이 만기 되어도, 매수 신호가 다시 발생했다면 팔지 않고 보유.
+                    if signal == 1:
+                        self.log(f'{data_name} HOLDING EXTENDED | Signal=1 (수수료 절약, 롤오버)')
+                        should_sell = False        # 매도 취소
+                        self.holding_days[data_name] = 0  # 보유일 리셋 (새로 산 셈 침)
+
                 # 2. 손절 (옵션)
                 elif self.params.use_stop_loss and data_name in self.buy_prices:
                     current_price = data.close[0]
@@ -206,7 +223,8 @@ class MLSignalStrategy(bt.Strategy):
                 
                 if should_sell:
                     self.log(f'{data_name} SELL ORDER | Reason: {sell_reason}')
-                    self.orders[data_name] = self.sell(data=data)
+                    size_to_sell = self.getposition(data).size
+                    self.orders[data_name] = self.sell(data=data, size=size_to_sell)
                     continue
             
             # ============ 매수 로직 ============
@@ -214,12 +232,7 @@ class MLSignalStrategy(bt.Strategy):
                 # 최대 포지션 제한 체크
                 if self.params.max_positions and current_positions >= self.params.max_positions:
                     continue
-                
-                # ML 신호 확인 (signal 라인이 있는 경우)
-                signal = 0
-                if hasattr(data.lines, 'signal'):
-                    signal = data.lines.signal[0]
-                
+
                 if signal == 1:
                     # 동일 비중으로 매수 금액 계산
                     cash = self.broker.getcash()
@@ -237,6 +250,19 @@ class MLSignalStrategy(bt.Strategy):
                                     f'Signal=1 | Price: {price:,.0f} | Size: {size} | Total: {price*size}')
                             self.orders[data_name] = self.buy(data=data, size=size)
                             current_positions += 1
+                elif signal == 0:
+                    continue
+                else:
+                    current_date = data.datetime.date(0)
+                    raise ValueError(
+                        f"\n{'='*60}\n"
+                        f"부적절한 ML 신호값이 감지되었습니다.\n"
+                        f"----------------------------------------\n"
+                        f"📅 날짜: {current_date}\n"
+                        f"📈 종목: {data_name}\n"
+                        f"❌ 값  : {signal} (기대값: 0 또는 1)\n"
+                        f"{'='*60}"
+                    )
     
     def stop(self):
         """백테스트 종료 시 호출"""

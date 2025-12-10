@@ -7,38 +7,26 @@ data:
     - "005930.KS"    # 삼성전자
     - "000660.KS"    # SK하이닉스
     - "051910.KS"    # LG화학
-  start_date: "2020-01-01"
-  end_date: "2023-12-31"
+    - "207940.KS"    # SM Entertainment
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+#  start_date: "2025-01-01"
+#  end_date: "2025-11-30"
   #백테스트 과정에 쓰이는 모든 지표 리스트 (OHLCV 제외)
   indicator_list:
     - "ma_5"
-    - "ma_10"
     - "ma_20"
-    - "ma_50"
-    - "ma_60"
-    - "ma_100"
-    - "ma_120"
     - "ma_200"
     - "macd"
-    - "macd_hist"
-    - "macd_signal"
-    - "rsi"
-    - "bb_upper"
-    - "bb_mid"
-    - "bb_lower"
-    - "bb_pct"
-    - "atr"
-    - "hv"
-    - "obv"
 
 # ==========================================
 # 🔶 모델 학습 설정
 # ==========================================
 ml:
-  model_path: ""
+  model_path: "models/momentum_model.pkl"
 
 # ==========================================
-# 🔶 백테스트 설정 (NEW)
+# 🔶 백테스트 설정
 # ==========================================
 backtest:
   basic_params:
@@ -53,10 +41,10 @@ backtest:
   strategy_params:
     # 보유 기간
     holding_period: 5       # 보유 기간 (일)
-    # 투자 비중
-    equal_weight: true
+    # 각 종목당 투자 비중
+    position_weight: null
     # 손절 설정
-    use_stop_loss: false
+    use_stop_loss: true
     stop_loss_pct: 0.05     # 5%
     # 익절 설정
     use_take_profit: false
@@ -75,5 +63,5 @@ backtest:
 log_level: "INFO"
 
 # 출력 설정
-plot_path: "output/backtest_chart.png"
-csv_path: "output/backtest_results.csv"
+plot_path: "data/backtest/backtest_chart.png"
+output_csv: "data/backtest/backtest_results.csv"

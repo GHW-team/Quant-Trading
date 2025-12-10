@@ -9,7 +9,7 @@ import backtrader as bt
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from src.backtest.data_feed import create_feeds_from_db, create_feeds_from_dataframe
+from src.backtest.data_feed import create_feeds_from_dataframe
 from src.backtest.strategy import MLSignalStrategy, BuyAndHoldStrategy
 from src.backtest.analyzer import PerformanceAnalyzer, PerformanceMetrics
 
@@ -84,8 +84,8 @@ class BacktestRunner:
         """
         ticker_codes = df_dict.keys()
         first_df = next(iter(df_dict.values()))
-        start_date = first_df.index.min().strftime('%Y-%m-%d')
-        end_date = first_df.index.max().strftime('%Y-%m-%d')
+        start_date = pd.to_datetime(first_df['date']).min().strftime('%Y-%m-%d')
+        end_date = pd.to_datetime(first_df['date']).max().strftime('%Y-%m-%d')
         
 
         logger.info(f"\n{'='*60}")
@@ -193,7 +193,7 @@ class BacktestRunner:
         results['benchmark'] = self.run(
             df_dict=df_dict,
             strategy_class=BuyAndHoldStrategy,
-            strategy_params=strategy_params,
+            strategy_params={'printlog': True},
         )
         
         # 비교 출력

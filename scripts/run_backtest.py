@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
+import joblib
 
 # 프로젝트 루트 경로 추가
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +22,7 @@ from src.data.db_manager import DatabaseManager
 from src.ml.logistic_regression import LogisticRegressionHandler
 from src.data.pipeline import DataPipeline
 
-CONFIG_PATH = "/app/config/backtest.yaml"
+CONFIG_PATH = "config/backtest.yaml"
 
 
 # ============================================
@@ -75,7 +76,7 @@ def generate_ml_signals(
         return signals
     
     try:
-        handler = LogisticRegressionHandler.load(model_path)
+        handler = joblib.load(model_path)
         logger.info(f"✓ 모델 로드 완료: {model_path}")
     except Exception as e:
         logger.error(f"모델 로드 실패: {e}")
@@ -86,25 +87,29 @@ def generate_ml_signals(
 
     #티커리스트 불러오기
     ticker_list = df_dict.keys()
+    
     for ticker in ticker_list:
         try:
             df = df_dict[ticker]
 
-            # NaN 제거 (예측에 필요)
-            df_clean = df.dropna(subset=feature_columns)
-            
-            if df_clean.empty:
-                logger.warning(f"{ticker}: 유효한 데이터 없음")
-                continue
-            
+            # ML 입력값 선택
+            X = df[feature_columns]
+
+            # NaN 검사
+            if X.isnull().any().any():
+                nan_report = X.isnull().sum()
+                nan_report = nan_report[nan_report > 0]
+                logger.error(f"🛑 [Data Integrity Error] {ticker}")
+                logger.error(f"상세 내역:\n{nan_report}")                
+                raise ValueError(f"{ticker}: 데이터 무결성 위반 (NaN포함됨)")
+
             # 예측
-            X = df_clean[feature_columns]
-            predictions = handler.predict(X)
+            predictions = handler.predict(X,threshold = 0.57)
             
             # 신호 시리즈 생성
             signal_series = pd.Series(
                 predictions,
-                index=pd.to_datetime(df_clean['date']),
+                index=pd.to_datetime(df['date']),
                 name='signal'
             )
             
@@ -120,11 +125,6 @@ def generate_ml_signals(
             continue
     
     return signals
-
-
-# ============================================
-# DB에서 DataFrame 로드
-# ============================================
 
 # ============================================
 # 메인 실행
@@ -159,7 +159,7 @@ def main():
     basic_params = config['backtest']['basic_params']
 
     initial_cash = basic_params['initial_cash']
-    commision = basic_params['commission']
+    commission = basic_params['commission']
     slippage = basic_params['slippage']
         # (2) Strategy 전용 변수
     strategy_params = config['backtest']['strategy_params']
@@ -173,7 +173,7 @@ def main():
     logger.info(f"종목: {ticker_codes}")
     logger.info(f"기간: {start_date} ~ {end_date}")
     logger.info(f"초기 자본: {initial_cash:,.0f}")
-    logger.info(f"수수료: {commision:.4%}")
+    logger.info(f"수수료: {commission:.4%}")
     logger.info(f"슬리피지: {slippage:.4%}")
     
     try:
@@ -224,18 +224,17 @@ def main():
             # 업데이트된 df를 다시 저장
             df_dict[ticker] = df
 
-        logger.info(f"{ticker}: 신호 병합 완료 ")
+        logger.info(f"신호 병합 완료 ")
         
         # ============ 백테스트 실행 ============
         runner = BacktestRunner(
             db_path=db_path,
             initial_cash=initial_cash,
-            commission=commision,
+            commission=commission,
             slippage=slippage,
         )
         
         metrics = runner.run(
-            ticker_codes=ticker_codes,
             df_dict = df_dict,
             strategy_class=strategy_class,
             strategy_params=strategy_params,

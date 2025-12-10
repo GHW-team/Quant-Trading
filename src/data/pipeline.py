@@ -187,7 +187,9 @@ class DataPipeline:
                 logger.info(f"Period '{period}' converted to start_date={start_date}, end_date={end_date}")
 
             # ============ Lookback 계산 및 적용 (안전 마진 포함) ============
-            original_start_date = start_date  # 원래 요청한 start_date 저장
+            # 원래 요청한 start_date 벡압
+            original_start_date = start_date  
+            # 룩백 적용된 날짜 적용
             start_date = self._calculate_extended_start_date(start_date, indicator_list)
 
             # 전체 결과를 저장할 dict
@@ -334,7 +336,7 @@ class DataPipeline:
                     continue
 
                 # 메모리 정리
-                all_calculated_dict.update(batch_calculated_dict)
+                all_calculated_dict.update(filtered_indicator_dict)
                 del batch_df_dict
                 del batch_calculated_dict
 
