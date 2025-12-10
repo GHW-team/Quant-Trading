@@ -182,7 +182,8 @@ class DatabaseManager:
         - 지표 컬럼만 선택, NaN을 None으로 치환 후 UPSERT
         """
         results = {}
-        indicators = ['ma_5', 'ma_20', 'ma_200', 'macd']
+        indicators = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_hist', 'macd_signal',
+                      'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct', 'atr', 'hv', 'stoch_k', 'stoch_d', 'obv']
 
         ticker_ids = {}
         for ticker_code in indicator_data_dict.keys():
