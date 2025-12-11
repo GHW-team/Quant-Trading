@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """데이터베이스 관리 클래스"""
+    INDICATORS = [
+        'ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200',
+        'macd', 'macd_hist', 'macd_signal',
+        'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct',
+        'atr', 'hv', 'stoch_k', 'stoch_d', 'obv'
+    ]
 
     def __init__(self, db_path: str = "data/database/stocks.db"):
         self.db_path = db_path
@@ -182,8 +188,7 @@ class DatabaseManager:
         - 지표 컬럼만 선택, NaN을 None으로 치환 후 UPSERT
         """
         results = {}
-        indicators = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_hist', 'macd_signal',
-                      'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct', 'atr', 'hv', 'stoch_k', 'stoch_d', 'obv']
+        indicators = self.INDICATORS
 
         ticker_ids = {}
         for ticker_code in indicator_data_dict.keys():
@@ -313,10 +318,7 @@ class DatabaseManager:
             try:
                 stmt = select(
                     TechnicalIndicator.date,
-                    TechnicalIndicator.ma_5,
-                    TechnicalIndicator.ma_20,
-                    TechnicalIndicator.ma_200,
-                    TechnicalIndicator.macd,
+                    *[getattr(TechnicalIndicator, ind) for ind in self.INDICATORS]
                 ).join(
                     Ticker, Ticker.ticker_id == TechnicalIndicator.ticker_id
                 ).where(
