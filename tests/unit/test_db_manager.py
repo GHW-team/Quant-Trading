@@ -12,6 +12,7 @@ from src.data.db_models import Ticker, DailyPrice, TechnicalIndicator
 from src.data.db_manager import DatabaseManager
 from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import inspect
 
 class TestDatabaseManagerInitialization:
     """DatabaseManager 초기화 테스트"""
@@ -27,6 +28,14 @@ class TestDatabaseManagerInitialization:
         # 세션/엔진 초기화 확인
         assert db_manager.session is not None
         assert db_manager.engine is not None
+
+        #db 내부 테이블 생성 여부 확인
+        inspector = inspect(db_manager.engine)
+        table_names = inspector.get_table_names()
+
+        assert 'tickers' in table_names
+        assert 'daily_prices' in table_names
+        assert 'technical_indicators' in table_names
 
 
 class TestDatabaseManagerMarketInference:
@@ -55,7 +64,9 @@ class TestDatabaseManagerMarketInference:
 
 class TestDatabaseManagerTickerId:
     """Ticker ID 조회/생성 테스트"""
-
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_get_ticker_id_creates_new(self, db_manager):
         """새 ticker ID 생성"""
         ticker_id = db_manager._get_ticker_id('005930.KS')
@@ -64,7 +75,7 @@ class TestDatabaseManagerTickerId:
         assert ticker_id is not None
         assert isinstance(ticker_id, int)
 
-        #데이터 저장 여부
+        #DB 내에 Ticker 생성 여부
         saved_ticker = db_manager.session.query(Ticker).filter_by(ticker_id = ticker_id).first()
         assert saved_ticker is not None
         assert saved_ticker.ticker_code == '005930.KS' 
@@ -82,19 +93,6 @@ class TestDatabaseManagerTickerId:
         #검증(중복생성 여부)
         count = db_manager.session.query(Ticker).filter_by(ticker_code = '005930.KS').count()
         assert count == 1
-        
-    def test_get_ticker_id_with_explicit_market(self, db_manager):
-        """명시적 시장으로 ticker 생성"""
-        ticker_id = db_manager._get_ticker_id('TEST.XX', market='CUSTOM')
-        
-        saved_ticker = db_manager.session.query(Ticker).filter_by(ticker_id = ticker_id).first()
-        assert saved_ticker.market == "CUSTOM"
-
-    def test_multiple_tickers_different_ids(self, db_manager):
-        """여러 ticker가 다른 ID"""
-        id1 = db_manager._get_ticker_id('005930.KS')
-        id2 = db_manager._get_ticker_id('000660.KS')
-        assert id1 != id2
 
     def test_get_ticker_id_infers_market_automatically(self, db_manager):
         """market 인자가 없을 때 자동 추론되어 저장되는지 검증"""
@@ -102,6 +100,21 @@ class TestDatabaseManagerTickerId:
 
         saved_ticker = db_manager.session.query(Ticker).filter_by(ticker_id=ticker_id).first()
         assert saved_ticker.market == 'KOSPI'
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
+    def test_multiple_tickers_different_ids(self, db_manager):
+        """여러 ticker가 다른 ID"""
+        id1 = db_manager._get_ticker_id('005930.KS')
+        id2 = db_manager._get_ticker_id('000660.KS')
+        assert id1 != id2
+        
+    def test_get_ticker_id_with_explicit_market(self, db_manager):
+        """명시적 시장으로 ticker 생성"""
+        ticker_id = db_manager._get_ticker_id('TEST.XX', market='CUSTOM')
+        
+        saved_ticker = db_manager.session.query(Ticker).filter_by(ticker_id = ticker_id).first()
+        assert saved_ticker.market == "CUSTOM"
         
 
 class TestDatabaseManagerSavePriceData:

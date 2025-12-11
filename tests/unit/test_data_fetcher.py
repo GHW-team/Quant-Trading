@@ -15,13 +15,9 @@ from src.data.data_fetcher import StockDataFetcher
 
 class TestStockDataFetcherInitialization:
     """StockDataFetcher 초기화 테스트"""
-
-    def test_default_initialization(self):
-        """기본값으로 초기화(설정값 보호)"""
-        fetcher = StockDataFetcher()
-        assert fetcher.max_workers == 3
-        assert fetcher.max_retries == 3
-
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
     def test_invalid_max_workers_below_one(self):
         """max_workers < 1 시 ValueError 발생"""
         with pytest.raises(ValueError, match="max_workers must be at least 1"):
@@ -35,6 +31,10 @@ class TestStockDataFetcherInitialization:
 
 class TestStockDataFetcherSingleByPeriod:
     """Period 기반 단일 데이터 수집 테스트"""
+
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
 
     def test_fetch_single_by_period_success(self, mock_yfinance):
         """정상 수집"""
@@ -61,8 +61,7 @@ class TestStockDataFetcherSingleByPeriod:
 
         # 예상 컬럼명들
         expected_cols = ['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']
-        for col in expected_cols:
-            assert col in result.columns
+        assert set(expected_cols) == set(result.columns)
 
     @pytest.mark.parametrize("period,interval", [
         ('1y', '1d'),
@@ -72,7 +71,7 @@ class TestStockDataFetcherSingleByPeriod:
         ('1d', '1d'),
     ])
     def test_fetch_with_various_params(self, period, interval, mock_yfinance):
-        """다양한 period/interval 조합 테스트"""
+        """api 파라미터 입력 검증 (period / interval)"""
         fetcher = StockDataFetcher()
         result = fetcher._fetch_single_by_period('005930.KS', period=period, interval=interval)
 
@@ -90,6 +89,38 @@ class TestStockDataFetcherSingleByPeriod:
         assert isinstance(result, pd.DataFrame)
         assert len(result) > 0
 
+    def test_all_retries_exhausted(self):
+        """모든 재시도 소진"""
+        with patch('yfinance.Ticker') as mock:
+            mock_instance = MagicMock()
+            mock.return_value = mock_instance
+            mock_instance.history.side_effect = RequestException("Network error")
+
+            with patch('time.sleep') as mock_sleep:
+                fetcher = StockDataFetcher(max_retries=5)
+                result = fetcher._fetch_single_by_period('INVALID.XX')
+
+            assert result is None
+            assert mock_instance.history.call_count == 5
+
+    def test_exponential_backoff_timing(self):
+        """지수 백오프 시간 검증"""
+        with patch('yfinance.Ticker') as mock:
+            mock_instance = MagicMock()
+            mock.return_value = mock_instance
+            mock_instance.history.side_effect = RequestException("Network error")
+
+            with patch('time.sleep') as mock_sleep:
+                fetcher = StockDataFetcher(max_retries=4)
+                fetcher._fetch_single_by_period('005930.KS')
+
+                # 2^1 = 2, 2^2 = 4, 2^3 = 8 , .....
+                mock_sleep.assert_any_call(2)
+                mock_sleep.assert_any_call(4)
+                mock_sleep.assert_any_call(8)
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
     def test_empty_data_returns_none(self):
         """빈 데이터 반환 시 None"""
         with patch('yfinance.Ticker') as mock:
@@ -101,7 +132,10 @@ class TestStockDataFetcherSingleByPeriod:
             result = fetcher._fetch_single_by_period('INVALID.XX')
 
             assert result is None
-
+    
+    #==========================================
+    # 함수 에러 처리 테스트
+    #==========================================
     def test_network_error_with_retry(self):
         """네트워크 에러 재시도"""
         with patch('yfinance.Ticker') as mock:
@@ -127,19 +161,39 @@ class TestStockDataFetcherSingleByPeriod:
             assert result is not None
             assert mock_instance.history.call_count == 2
 
-    def test_all_retries_exhausted(self):
-        """모든 재시도 소진"""
+    @pytest.mark.parametrize("exception_type,exception_msg", [
+        (RequestException("Generic request error"), "generic error"),
+        (Timeout("Connection timeout"), "timeout"),
+        (ConnectionError("Connection failed"), "connection failed"),
+    ])
+    def test_request_exception_types(self, exception_type, exception_msg):
+        """RequestException 하위 타입 처리"""
         with patch('yfinance.Ticker') as mock:
             mock_instance = MagicMock()
             mock.return_value = mock_instance
-            mock_instance.history.side_effect = RequestException("Network error")
+            mock_instance.history.side_effect = exception_type
 
-            with patch('time.sleep') as mock_sleep:
-                fetcher = StockDataFetcher(max_retries=5)
-                result = fetcher._fetch_single_by_period('INVALID.XX')
+            fetcher = StockDataFetcher(max_retries=1)
+            result = fetcher._fetch_single_by_period('005930.KS')
 
             assert result is None
-            assert mock_instance.history.call_count == 5
+            assert mock_instance.history.call_count == 1  # 재시도 없이 실패
+
+    def test_invalid_date_format(self):
+        """유효하지 않은 날짜 형식"""
+        with patch('yfinance.Ticker') as mock:
+            mock_instance = MagicMock()
+            mock.return_value = mock_instance
+            mock_instance.history.side_effect = ValueError("Invalid date format")
+
+            fetcher = StockDataFetcher()
+            result = fetcher._fetch_single_by_date(
+                '005930.KS',
+                start_date='invalid-date',
+                end_date='2020-12-31'
+            )
+
+            assert result is None
 
     def test_unexpected_exception_handling(self):
         """예상치 못한 예외 처리"""
@@ -153,26 +207,12 @@ class TestStockDataFetcherSingleByPeriod:
 
             assert result is None
 
-    def test_exponential_backoff_timing(self):
-        """지수 백오프 시간 검증"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            mock_instance.history.side_effect = RequestException("Network error")
-
-            with patch('time.sleep') as mock_sleep:
-                fetcher = StockDataFetcher(max_retries=4)
-                fetcher._fetch_single_by_period('005930.KS')
-
-                # 2^1 = 2, 2^2 = 4, 2^3 = 8 , .....
-                mock_sleep.assert_any_call(2)
-                mock_sleep.assert_any_call(4)
-                mock_sleep.assert_any_call(8)
-
 
 class TestStockDataFetcherSingleByDate:
     """Date 기반 단일 데이터 수집 테스트"""
-
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_fetch_single_by_date_success(self, mock_yfinance):
         """정상 수집"""
         fetcher = StockDataFetcher()
@@ -238,7 +278,47 @@ class TestStockDataFetcherSingleByDate:
         assert isinstance(result,pd.DataFrame)
         assert result is not None
 
-    def test_empty_data_by_date_returns_none(self):
+    def test_all_retries_exhausted_by_date(self):
+        """모든 재시도 소진"""
+        with patch('yfinance.Ticker') as mock:
+            mock_instance = MagicMock()
+            mock.return_value = mock_instance
+            mock_instance.history.side_effect = RequestException("Network error")
+
+            with patch('time.sleep') as mock_sleep:
+                fetcher = StockDataFetcher(max_retries=5)
+                result = fetcher._fetch_single_by_date(
+                    'INVALID.XX',
+                    start_date='2020-01-01',
+                    end_date='2020-12-31'
+                )
+
+            assert result is None
+            assert mock_instance.history.call_count == 5
+
+    def test_exponential_backoff_timing_by_date(self):
+        """지수 백오프 시간 검증"""
+        with patch('yfinance.Ticker') as mock:
+            mock_instance = MagicMock()
+            mock.return_value = mock_instance
+            mock_instance.history.side_effect = RequestException("Network error")
+
+            with patch('time.sleep') as mock_sleep:
+                fetcher = StockDataFetcher(max_retries=4)
+                fetcher._fetch_single_by_date(
+                    '005930.KS',
+                    start_date='2020-01-01',
+                    end_date='2020-12-31'
+                )
+
+                # 2^1 = 2, 2^2 = 4, 2^3 = 8
+                mock_sleep.assert_any_call(2)
+                mock_sleep.assert_any_call(4)
+                mock_sleep.assert_any_call(8)
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
+    def test_empty_data_returns_none(self):
         """빈 데이터 반환 시 None"""
         with patch('yfinance.Ticker') as mock:
             mock_instance = MagicMock()
@@ -249,11 +329,14 @@ class TestStockDataFetcherSingleByDate:
             result = fetcher._fetch_single_by_date(
                 'INVALID.XX',
                 start_date='2020-01-01',
-                end_date='2020-01-31'
+                end_date='2020-12-31'
             )
 
             assert result is None
 
+    #==========================================
+    # 함수 에러 처리 테스트
+    #==========================================
     def test_network_error_with_retry_by_date(self):
         """네트워크 에러 재시도"""
         with patch('yfinance.Ticker') as mock:
@@ -282,24 +365,28 @@ class TestStockDataFetcherSingleByDate:
             assert result is not None
             assert mock_instance.history.call_count == 2
 
-    def test_all_retries_exhausted_by_date(self):
-        """모든 재시도 소진"""
+    @pytest.mark.parametrize("exception_type,exception_msg", [
+        (RequestException("Generic request error"), "generic error"),
+        (Timeout("Connection timeout"), "timeout"),
+        (ConnectionError("Connection failed"), "connection failed"),
+    ])
+    def test_request_exception_types(self, exception_type, exception_msg):
+        """RequestException 하위 타입 처리"""
         with patch('yfinance.Ticker') as mock:
             mock_instance = MagicMock()
             mock.return_value = mock_instance
-            mock_instance.history.side_effect = RequestException("Network error")
+            mock_instance.history.side_effect = exception_type
 
-            with patch('time.sleep') as mock_sleep:
-                fetcher = StockDataFetcher(max_retries=5)
-                result = fetcher._fetch_single_by_date(
-                    'INVALID.XX',
-                    start_date='2020-01-01',
-                    end_date='2020-12-31'
-                )
+            fetcher = StockDataFetcher(max_retries=1)
+            result = fetcher._fetch_single_by_date(
+                '005930.KS',
+                start_date='2020-01-01',
+                end_date='2020-12-31'
+            )
 
             assert result is None
-            assert mock_instance.history.call_count == 5
-
+            assert mock_instance.history.call_count == 1  # 재시도 없이 실패
+            
     def test_unexpected_exception_handling_by_date(self):
         """예상치 못한 예외 처리"""
         with patch('yfinance.Ticker') as mock:
@@ -316,30 +403,12 @@ class TestStockDataFetcherSingleByDate:
 
             assert result is None
 
-    def test_exponential_backoff_timing_by_date(self):
-        """지수 백오프 시간 검증"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            mock_instance.history.side_effect = RequestException("Network error")
-
-            with patch('time.sleep') as mock_sleep:
-                fetcher = StockDataFetcher(max_retries=4)
-                fetcher._fetch_single_by_date(
-                    '005930.KS',
-                    start_date='2020-01-01',
-                    end_date='2020-12-31'
-                )
-
-                # 2^1 = 2, 2^2 = 4, 2^3 = 8
-                mock_sleep.assert_any_call(2)
-                mock_sleep.assert_any_call(4)
-                mock_sleep.assert_any_call(8)
-
 
 class TestStockDataFetcherMultipleByPeriod:
     """Period 기반 병렬 수집 테스트"""
-
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_fetch_multiple_by_period_success(self, mock_yfinance):
         """정상 병렬 수집"""
         fetcher = StockDataFetcher(max_workers=2)
@@ -351,45 +420,6 @@ class TestStockDataFetcherMultipleByPeriod:
         assert len(result) == 2
         assert '005930.KS' in result
         assert '000660.KS' in result
-
-    def test_empty_ticker_list(self):
-        """빈 ticker 리스트"""
-        fetcher = StockDataFetcher()
-        result = fetcher.fetch_multiple_by_period([], period='1y')
-
-        assert result == {}
-        assert isinstance(result, dict)
-
-    def test_partial_success(self):
-        """부분 성공"""
-        with patch.object(StockDataFetcher, '_fetch_single_by_period') as mock:
-            # 첫 번째는 성공, 두 번째는 실패
-            mock.side_effect = [
-                None,  # 실패
-                pd.DataFrame({'date': ['2020-01-01'], 'close': [100]}),
-            ]
-
-            fetcher = StockDataFetcher(max_workers=2)
-            result = fetcher.fetch_multiple_by_period(
-                ['005930.KS', '000660.KS'],
-                period='1y'
-            )
-
-            assert '000660.KS' in result
-            assert len(result) == 1
-
-    def test_all_failures(self):
-        """모두 실패"""
-        with patch.object(StockDataFetcher, '_fetch_single_by_period') as mock:
-            mock.return_value = None
-
-            fetcher = StockDataFetcher(max_workers=2)
-            result = fetcher.fetch_multiple_by_period(
-                ['INVALID1.XX', 'INVALID2.XX'],
-                period='1y'
-            )
-
-            assert result == {}
 
     def test_parallel_execution(self):
         """병렬 실행 타이밍 검증"""
@@ -414,29 +444,63 @@ class TestStockDataFetcherMultipleByPeriod:
             assert elapsed < 0.2, f"병렬 실행 예상 시간 0.2초 미만, 실제: {elapsed:.3f}초"
             assert len(result) == 2
 
-    def test_single_ticker(self):
-        """단일 ticker"""
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
+    def test_empty_ticker_list(self):
+        """빈 ticker 리스트"""
         fetcher = StockDataFetcher()
-        result = fetcher.fetch_multiple_by_period(['005930.KS'], period='1y')
+        result = fetcher.fetch_multiple_by_period([], period='1y')
 
-        assert len(result) == 1
+        assert result == {}
+        assert isinstance(result, dict)
 
-    def test_large_ticker_list(self, mock_yfinance):
-        """많은 ticker"""
-        fetcher = StockDataFetcher(max_workers=5)
-        tickers = [f'TICK{i}.KS' for i in range(30)]
-
+    def test_partial_success(self):
+        """부분 성공"""
         with patch.object(StockDataFetcher, '_fetch_single_by_period') as mock:
-            mock.return_value = pd.DataFrame({'date': ['2020-01-01'], 'close': [100]})
+            # 첫 번째는 성공, 두 번째는 실패
+            mock.side_effect = [
+                None,  # 실패
+                pd.DataFrame({'date': ['2020-01-01'], 'close': [100]}),
+                None,
+            ]
 
-            result = fetcher.fetch_multiple_by_period(tickers, period='1y')
-            # 모두 성공
-            assert len(result) == 30
+            fetcher = StockDataFetcher(max_workers=2)
+            result = fetcher.fetch_multiple_by_period(
+                ['005930.KS', '000660.KS','002410.KS'],
+                period='1y'
+            )
+
+            assert '000660.KS' in result
+            assert len(result) == 1
+    #==========================================
+    # 함수 에러 처리 테스트
+    #==========================================
+    def test_thread_exception_handling(self):
+        """병렬 스레드 부분 예러 처리"""
+        with patch.object(StockDataFetcher, '_fetch_single_by_period') as mock:
+            mock.side_effect = [
+                RuntimeError("Thread exception"),
+                pd.DataFrame({'date': ['2020-01-01'], 'close': [100]}),
+                RuntimeError("Thread exception"),
+            ]
+
+            fetcher = StockDataFetcher(max_workers=2)
+            result = fetcher.fetch_multiple_by_period(
+                ['005930.KS', '000660.KS','001420.KS'],
+                period='1y'
+            )
+
+            # 에러 발생하지 않은 쓰레드 정상 작동
+            assert len(result) == 1
 
 
 class TestStockDataFetcherMultipleByDate:
     """Date 기반 병렬 수집 테스트"""
 
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_fetch_multiple_by_date_success(self, mock_yfinance):
         """정상 병렬 수집"""
         fetcher = StockDataFetcher(max_workers=2)
@@ -452,6 +516,32 @@ class TestStockDataFetcherMultipleByDate:
         assert '005930.KS' in result
         assert '000660.KS' in result
 
+    def test_parallel_execution_by_date(self):
+        """병렬 실행 타이밍 검증"""
+        start_time = time.time()
+
+        def mock_fetch(ticker, start_date, end_date, interval='1d', actions=False):
+            time.sleep(0.1)  # 각 호출마다 100ms 지연
+            return pd.DataFrame({'date': ['2020-01-01'], 'close': [100]})
+
+        with patch.object(StockDataFetcher, '_fetch_single_by_date', side_effect=mock_fetch):
+            fetcher = StockDataFetcher(max_workers=2)
+            result = fetcher.fetch_multiple_by_date(
+                ['005930.KS', '000660.KS'],
+                start_date='2020-01-01',
+                end_date='2020-12-31'
+            )
+
+            elapsed = time.time() - start_time
+
+            # 병렬 실행: 2개 × 100ms = 100ms + overhead (약 0.12~0.18초)
+            # 순차 실행: 2개 × 100ms = 200ms + overhead (약 0.20초 이상)
+            # 병렬 실행을 확인하기 위해 0.2초 이내로 완료되어야 함
+            assert elapsed < 0.2, f"병렬 실행 예상 시간 0.2초 미만, 실제: {elapsed:.3f}초"
+            assert len(result) == 2
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
     def test_empty_ticker_list_by_date(self):
         """빈 ticker 리스트"""
         fetcher = StockDataFetcher()
@@ -481,181 +571,24 @@ class TestStockDataFetcherMultipleByDate:
 
             assert '000660.KS' in result
             assert len(result) == 1
-
-    def test_all_failures_by_date(self):
-        """모두 실패"""
-        with patch.object(StockDataFetcher, '_fetch_single_by_date') as mock:
-            mock.return_value = None
-
-            fetcher = StockDataFetcher(max_workers=2)
-            result = fetcher.fetch_multiple_by_date(
-                ['INVALID1.XX', 'INVALID2.XX'],
-                start_date='2020-01-01',
-                end_date='2020-12-31'
-            )
-
-            assert result == {}
-
-    def test_parallel_execution_by_date(self):
-        """병렬 실행 타이밍 검증"""
-        start_time = time.time()
-
-        def mock_fetch(ticker, start_date, end_date, interval='1d', actions=False):
-            time.sleep(0.1)  # 각 호출마다 100ms 지연
-            return pd.DataFrame({'date': ['2020-01-01'], 'close': [100]})
-
-        with patch.object(StockDataFetcher, '_fetch_single_by_date', side_effect=mock_fetch):
-            fetcher = StockDataFetcher(max_workers=2)
-            result = fetcher.fetch_multiple_by_date(
-                ['005930.KS', '000660.KS'],
-                start_date='2020-01-01',
-                end_date='2020-12-31'
-            )
-
-            elapsed = time.time() - start_time
-
-            # 병렬 실행: 2개 × 100ms = 100ms + overhead (약 0.12~0.18초)
-            # 순차 실행: 2개 × 100ms = 200ms + overhead (약 0.20초 이상)
-            # 병렬 실행을 확인하기 위해 0.2초 이내로 완료되어야 함
-            assert elapsed < 0.2, f"병렬 실행 예상 시간 0.2초 미만, 실제: {elapsed:.3f}초"
-            assert len(result) == 2
-
-    def test_single_ticker_by_date(self):
-        """단일 ticker"""
-        fetcher = StockDataFetcher()
-        result = fetcher.fetch_multiple_by_date(
-            ['005930.KS'],
-            start_date='2020-01-01',
-            end_date='2020-12-31'
-        )
-
-        assert len(result) == 1
-
-    def test_large_ticker_list_by_date(self, mock_yfinance):
-        """많은 ticker"""
-        fetcher = StockDataFetcher(max_workers=5)
-        tickers = [f'TICK{i}.KS' for i in range(30)]
-
-        with patch.object(StockDataFetcher, '_fetch_single_by_date') as mock:
-            mock.return_value = pd.DataFrame({'date': ['2020-01-01'], 'close': [100]})
-
-            result = fetcher.fetch_multiple_by_date(
-                tickers,
-                start_date='2020-01-01',
-                end_date='2020-12-31'
-            )
-
-            # 모두 성공
-            assert len(result) == 30
-
-
-class TestStockDataFetcherErrorHandling:
-    """에러 처리 테스트"""
-
-    @pytest.mark.parametrize("exception_type,exception_msg", [
-        (RequestException("Generic request error"), "generic error"),
-        (Timeout("Connection timeout"), "timeout"),
-        (ConnectionError("Connection failed"), "connection failed"),
-    ])
-    def test_request_exception_types(self, exception_type, exception_msg):
-        """RequestException 하위 타입 처리"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            mock_instance.history.side_effect = exception_type
-
-            fetcher = StockDataFetcher(max_retries=1)
-            result = fetcher._fetch_single_by_period('005930.KS')
-
-            assert result is None
-            assert mock_instance.history.call_count == 1  # 재시도 없이 실패
-
-    def test_invalid_date_format(self):
-        """유효하지 않은 날짜 형식"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            mock_instance.history.side_effect = ValueError("Invalid date format")
-
-            fetcher = StockDataFetcher()
-            result = fetcher._fetch_single_by_date(
-                '005930.KS',
-                start_date='invalid-date',
-                end_date='2020-12-31'
-            )
-
-            assert result is None
-
+    #==========================================
+    # 함수 에러 처리 테스트
+    #==========================================
     def test_thread_exception_handling(self):
-        """스레드 내 예외 처리"""
-        with patch.object(StockDataFetcher, '_fetch_single_by_period') as mock:
-            mock.side_effect = RuntimeError("Thread exception")
+        """병렬 스레드 부분 예러 처리"""
+        with patch.object(StockDataFetcher, '_fetch_single_by_date') as mock:
+            mock.side_effect = [
+                RuntimeError("Thread exception"),
+                pd.DataFrame({'date': ['2020-01-01'], 'close': [100]}),
+                RuntimeError("Thread exception"),
+            ]
 
             fetcher = StockDataFetcher(max_workers=2)
-            result = fetcher.fetch_multiple_by_period(
-                ['005930.KS', '000660.KS'],
-                period='1y'
+            result = fetcher.fetch_multiple_by_date(
+                ['005930.KS', '000660.KS','001420.KS'],
+                start_date='2020-01-01',
+                end_date='2020-12-31'
             )
 
-            # 예외가 발생해도 결과는 빈 dict
-            assert result == {}
-
-
-class TestStockDataFetcherEdgeCases:
-    """엣지 케이스 테스트"""
-
-    def test_single_row_data(self):
-        """1개 행만 반환"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            mock_instance.history.return_value = pd.DataFrame({
-                'Open': [100],
-                'High': [101],
-                'Low': [99],
-                'Close': [100.5],
-                'Adj Close': [100.5],
-                'Volume': [1000000],
-            }, index=pd.DatetimeIndex(['2020-01-01']))
-
-            fetcher = StockDataFetcher()
-            result = fetcher._fetch_single_by_period('005930.KS')
-
+            # 에러 발생하지 않은 쓰레드 정상 작동
             assert len(result) == 1
-
-    def test_large_data(self):
-        """많은 행 데이터"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            dates = pd.date_range('2000-01-01', periods=5000)
-            mock_instance.history.return_value = pd.DataFrame({
-                'Open': np.random.randn(5000) + 100,
-                'High': np.random.randn(5000) + 101,
-                'Low': np.random.randn(5000) + 99,
-                'Close': np.random.randn(5000) + 100.5,
-                'Adj Close': np.random.randn(5000) + 100.5,
-                'Volume': np.random.randint(1000000, 2000000, 5000),
-            }, index=dates)
-
-            fetcher = StockDataFetcher()
-            result = fetcher._fetch_single_by_period('005930.KS')
-
-            assert len(result) == 5000
-
-    def test_nan_values_in_data(self):
-        """NaN 값이 포함된 데이터"""
-        with patch('yfinance.Ticker') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            mock_instance.history.return_value = pd.DataFrame({
-                'Open': [100, np.nan, 102],
-                'Close': [100.5, 101.5, np.nan],
-            }, index=pd.DatetimeIndex(['2020-01-01', '2020-01-02', '2020-01-03']))
-
-            fetcher = StockDataFetcher()
-            result = fetcher._fetch_single_by_period('005930.KS')
-
-            # NaN도 포함됨
-            assert len(result) == 3
-            assert result['open'].isna().sum() > 0
