@@ -90,11 +90,19 @@ class TestTickerUniverseGetMethod:
             assert result1 == result2 == result3
 
     def test_get_empty_exchanges_list(self):
-        """빈 거래소 목록"""
-        universe = TickerUniverse()
-        result = universe.get([])
+        """빈 거래소 목록은 모든 거래소 로드 (기본값)"""
+        with patch('src.data.all_ticker.pykrx_stock') as mock_pykrx:
+            with patch('src.data.all_ticker.fdr') as mock_fdr:
+                mock_pykrx.get_market_ticker_list.return_value = ['005930']
+                mock_fdr.StockListing.return_value = pd.DataFrame({
+                    'Symbol': ['AAPL']
+                })
 
-        assert result == []
+                universe = TickerUniverse()
+                result = universe.get([])
+
+                # 빈 리스트는 falsy이므로 모든 거래소가 로드됨
+                assert len(result) > 0
 
     def test_get_unsupported_exchange(self):
         """지원하지 않는 거래소"""
@@ -492,10 +500,12 @@ class TestLoadAllTickersFunction:
         """딕셔너리 반환"""
         with patch('src.data.all_ticker.pykrx_stock') as mock_pykrx:
             with patch('src.data.all_ticker.fdr') as mock_fdr:
+                # load_all_tickers calls: KOSPI (for KRX), KOSDAQ (for KRX), KOSPI, KOSDAQ
                 mock_pykrx.get_market_ticker_list.side_effect = [
+                    ['005930'],  # KOSPI for KRX
+                    ['068270'],  # KOSDAQ for KRX
                     ['005930'],  # KOSPI
                     ['068270'],  # KOSDAQ
-                    ['005930', '068270'],  # KRX (all)
                 ]
                 mock_fdr.StockListing.side_effect = [
                     pd.DataFrame({'Symbol': ['AAPL']}),  # S&P500
@@ -514,34 +524,25 @@ class TestLoadAllTickersFunction:
                 assert 'AMEX' in result
 
     def test_load_all_tickers_krx_failure_with_fallback(self):
-        """KRX 실패 시 FDR fallback"""
+        """pykrx 실패 시 예외 발생 (load_all_tickers는 fallback 없음)"""
         with patch('src.data.all_ticker.pykrx_stock') as mock_pykrx:
-            with patch('src.data.all_ticker.fdr') as mock_fdr:
-                # pykrx KRX 로드 실패 (처음 2개는 get_market_ticker_list, 3번째는 _load_krx)
-                mock_pykrx.get_market_ticker_list.side_effect = Exception("KRX error")
-                # FDR fallback
-                mock_fdr.StockListing.side_effect = [
-                    pd.DataFrame({'Symbol': ['005930'], 'Market': ['KOSPI']}),  # KRX fallback
-                    pd.DataFrame({'Symbol': ['AAPL']}),  # S&P500
-                    pd.DataFrame({'Symbol': ['IBM']}),   # NYSE
-                    pd.DataFrame({'Symbol': ['XBI']})    # AMEX
-                ]
+            # pykrx 실패 시 load_all_tickers는 예외를 발생시킴 (fallback 없음)
+            mock_pykrx.get_market_ticker_list.side_effect = Exception("KRX error")
 
-                result = load_all_tickers()
-
-                assert isinstance(result, dict)
-                assert 'KRX' in result
-                # FDR fallback으로 데이터 로드됨
-                assert len(result['KRX']) > 0
+            # load_all_tickers는 예외 처리가 없으므로 Exception이 발생함
+            with pytest.raises(Exception):
+                load_all_tickers()
 
     def test_load_all_tickers_krx_structure(self):
         """KRX 구조"""
         with patch('src.data.all_ticker.pykrx_stock') as mock_pykrx:
             with patch('src.data.all_ticker.fdr') as mock_fdr:
+                # load_all_tickers calls: KOSPI (for KRX), KOSDAQ (for KRX), KOSPI, KOSDAQ
                 mock_pykrx.get_market_ticker_list.side_effect = [
+                    ['005930'],  # KOSPI for KRX
+                    ['068270'],  # KOSDAQ for KRX
                     ['005930'],  # KOSPI
                     ['068270'],  # KOSDAQ
-                    ['005930', '068270'],  # KRX
                 ]
                 mock_fdr.StockListing.return_value = pd.DataFrame({'Symbol': []})
 
@@ -554,8 +555,11 @@ class TestLoadAllTickersFunction:
         """KOSPI 구조"""
         with patch('src.data.all_ticker.pykrx_stock') as mock_pykrx:
             with patch('src.data.all_ticker.fdr') as mock_fdr:
+                # load_all_tickers calls: KOSPI (for KRX), KOSDAQ (for KRX), KOSPI, KOSDAQ
                 mock_pykrx.get_market_ticker_list.side_effect = [
-                    ['005930', '000660'],  # KOSPI (twice)
+                    ['005930', '000660'],  # KOSPI for KRX
+                    ['068270'],  # KOSDAQ for KRX
+                    ['005930', '000660'],  # KOSPI
                     ['068270'],  # KOSDAQ
                 ]
                 mock_fdr.StockListing.return_value = pd.DataFrame({'Symbol': []})

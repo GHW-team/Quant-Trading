@@ -4,6 +4,9 @@
 """
 
 import pytest
+import tempfile
+import yaml
+from pathlib import Path
 
 
 @pytest.fixture
@@ -42,3 +45,27 @@ def sample_config():
             },
         },
     }
+
+
+@pytest.fixture
+def temp_config_file(tmp_path):
+    """임시 YAML 설정 파일 생성"""
+    config_data = {
+        'data': {
+            'database_path': 'data/database/stocks.db',
+            'tickers': ['AAPL', 'MSFT'],
+            'period': '1y',
+        },
+        'indicators': {
+            'list': ['ma_5', 'ma_20', 'rsi'],
+        },
+        'batch': {
+            'size': 10,
+        },
+    }
+
+    config_file = tmp_path / "test_config.yaml"
+    with open(config_file, 'w') as f:
+        yaml.dump(config_data, f)
+
+    return str(config_file)
