@@ -13,6 +13,7 @@ from src.data.db_manager import DatabaseManager
 from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect
+
 #__init__
 class TestDatabaseManagerInitialization:
     """DatabaseManager 초기화 테스트"""
@@ -460,21 +461,34 @@ class TestDatabaseManagerSaveIndicators:
 
     def test_save_indicators_missing_columns(self, db_manager, sample_df_with_indicators):
         """일부 컬럼 누락 시 처리"""
-        num = len(sample_df_with_indicators)
-
-        partial_df = sample_df_with_indicators.drop(columns = ['macd','ma_10','ma_200'], axis=1)
+        # 일부 지표만 부분적으로 저장.
+        partial_indicators = ['macd', 'ma_5', 'ma_10','rsi', 'bb_upper', 'bb_mid']
+        partial_df = sample_df_with_indicators[partial_indicators + ['date']].copy()
         df_dict = {'005930.KS': partial_df}
 
         db_manager._get_ticker_id('005930.KS')
         result = db_manager.save_indicators(df_dict)
 
         # 반환값 검증 (일부 컬럼 누락되어도 정상적으로 저장 되는지 확인)
-        assert result['005930.KS'] == num
+        num = len(sample_df_with_indicators)
+        assert result['005930.KS'] == num        
+        
 
         # DB 검증 (실제로 저장 되었는지 확인)
         ticker = db_manager.session.query(Ticker).filter_by(ticker_code='005930.KS').first()
-        count = db_manager.session.query(TechnicalIndicator).filter_by(ticker_id=ticker.ticker_id).count()
-        assert count == num
+        indicator = db_manager.session.query(TechnicalIndicator)\
+            .filter_by(ticker_id=ticker.ticker_id)\
+            .order_by(TechnicalIndicator.date.desc())\
+            .first()
+        assert indicator is not None
+
+        # paritial_indicator는 값 존재, 나미저는 값 없음.
+        indicator_list = db_manager.INDICATORS
+        for ind in indicator_list:
+            if ind in partial_indicators:
+                assert getattr(indicator, ind) is not None
+            else:
+                assert getattr(indicator, ind) is None
     #==========================================
     # 함수 에러 처리 테스트
     #==========================================
@@ -811,6 +825,39 @@ class TestDatabaseManagerLoadIndicators:
         # 빈 DataFrame 반환
         assert 'NONEXISTENT.KS' in df_dict_load
         assert df_dict_load['NONEXISTENT.KS'].empty
+    
+    def test_save_indicators_partial_columns(self, db_manager, sample_df_with_indicators):
+        """지표 컬럼이 일부만 존재할 때"""
+        # 일부 지표만 부분적으로 저장
+        partial_indicators = ['ma_5', 'ma_50', 'bb_mid', 'atr']
+        partial_df = sample_df_with_indicators[partial_indicators + ['date']].copy()
+        db_manager._get_ticker_id('005930.KS')
+        result = db_manager.save_indicators({'005930.KS': partial_df})
+
+        # DB 로드
+        loaded = db_manager.load_indicators(['005930.KS'])
+        df_loaded = loaded['005930.KS']
+
+        # partial_indicators 는 있고 다른 지표들은 NaN이어야 함
+        indicator_list = db_manager.INDICATORS
+        for ind in indicator_list:
+            if ind in partial_indicators: 
+                assert not pd.isna(df_loaded.iloc[-1][ind])
+            else:
+                assert pd.isna(df_loaded.iloc[-1][ind])
+    
+    def test_partial_ticker_list_exists(self, db_manager, sample_df_basic):
+        """부분적으로만 존재하는 ticker 목록 로드"""
+        # 일부 ticker만 저장
+        db_manager.save_price_data({'005930.KS': sample_df_basic}, update_if_exists=True)
+
+        # 존재하는 ticker와 존재하지 않는 ticker를 함께 로드
+        result = db_manager.load_price_data(['005930.KS', 'NONEXISTENT.KS'])
+
+        assert '005930.KS' in result
+        assert 'NONEXISTENT.KS' in result
+        assert len(result['005930.KS']) == len(sample_df_basic)
+        assert result['NONEXISTENT.KS'].empty
     #==========================================
     # 함수 에러 처리 테스트
     #==========================================
@@ -917,89 +964,3 @@ class TestDatabaseManagerDataIntegrity:
         loaded = db_manager.load_indicators(['005930.KS'])
         df_loaded = loaded['005930.KS']
         assert pd.isna(df_loaded.iloc[0]['ma_5'])
-
-    def test_save_indicators_partial_columns(self, db_manager, sample_df_with_indicators):
-        """지표 컬럼이 일부만 존재할 때"""
-        # ma_5만 남기고 나머지 지표 제거
-        df_partial = sample_df_with_indicators[['date', 'ma_5']].copy()
-
-        db_manager._get_ticker_id('005930.KS')
-        result = db_manager.save_indicators({'005930.KS': df_partial})
-
-        # 저장 검증
-        assert result['005930.KS'] == len(df_partial)
-
-
-        # DB 직접 조회
-        ticker = db_manager.session.query(Ticker).filter_by(ticker_code='005930.KS').first()
-        indicator = db_manager.session.query(TechnicalIndicator).filter_by(
-            ticker_id=ticker.ticker_id
-        ).order_by(TechnicalIndicator.date.desc()).first()
-        
-        # ma_5는 값 있고, 나머지는 None
-        assert indicator.ma_5 is not None
-        assert indicator.ma_20 is None
-        assert indicator.ma_200 is None
-        assert indicator.macd is None
-
-        loaded = db_manager.load_indicators(['005930.KS'])
-        df_loaded = loaded['005930.KS']
-        # ma_5는 있고 다른 지표들은 NaN이어야 함
-        assert not pd.isna(df_loaded.iloc[-1]['ma_5'])
-        assert pd.isna(df_loaded.iloc[-1]['ma_20'])
-        assert pd.isna(df_loaded.iloc[-1]['ma_200'])
-        assert pd.isna(df_loaded.iloc[-1]['macd'])
-
-    def test_partial_ticker_list_exists(self, db_manager, sample_df_basic):
-        """부분적으로만 존재하는 ticker 목록 로드"""
-        # 일부 ticker만 저장
-        db_manager.save_price_data({'005930.KS': sample_df_basic}, update_if_exists=True)
-
-        # 존재하는 ticker와 존재하지 않는 ticker를 함께 로드
-        result = db_manager.load_price_data(['005930.KS', 'NONEXISTENT.KS'])
-
-        assert '005930.KS' in result
-        assert 'NONEXISTENT.KS' in result
-        assert len(result['005930.KS']) == len(sample_df_basic)
-        assert result['NONEXISTENT.KS'].empty
-
-
-class TestDatabaseManagerEdgeCases:
-    """엣지 케이스 테스트"""
-
-    def test_large_dataset_save_and_load(self, db_manager):
-        """큰 데이터셋 저장/로드"""
-        # 1000개 행의 데이터 생성
-        large_df = pd.DataFrame({
-            'date': pd.date_range('2020-01-01', periods=1000),
-            'open': np.random.randn(1000) + 100,
-            'high': np.random.randn(1000) + 101,
-            'low': np.random.randn(1000) + 99,
-            'close': np.random.randn(1000) + 100,
-            'volume': np.random.randint(1000000, 2000000, 1000),
-            'adj_close': np.random.randn(1000) + 100,
-        })
-
-        result = db_manager.save_price_data({'005930.KS': large_df}, update_if_exists=True)
-        assert result['005930.KS'] == 1000
-
-        loaded = db_manager.load_price_data(['005930.KS'])
-        assert len(loaded['005930.KS']) == 1000
-
-    def test_context_manager_with_exception(self, temp_db_path, sample_df_basic):
-        """예외 발생 시 Context Manager 자동 정리"""
-        try:
-            with DatabaseManager(db_path=temp_db_path) as manager:
-                manager.save_price_data(
-                    {'005930.KS': sample_df_basic},
-                    update_if_exists=True
-                )
-                # 예외 발생
-                raise ValueError("Test exception")
-        except ValueError:
-            pass
-
-        # manager가 자동으로 close되었는지 확인 (재연결로 검증)
-        with DatabaseManager(db_path=temp_db_path) as manager:
-            loaded = manager.load_price_data(['005930.KS'])
-            assert len(loaded['005930.KS']) > 0

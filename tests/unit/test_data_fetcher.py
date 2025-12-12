@@ -12,7 +12,7 @@ import time
 
 from src.data.data_fetcher import StockDataFetcher
 
-
+#__init__
 class TestStockDataFetcherInitialization:
     """StockDataFetcher 초기화 테스트"""
     #==========================================
@@ -28,7 +28,11 @@ class TestStockDataFetcherInitialization:
         with pytest.raises(ValueError, match="max_retries cannot be negative"):
             StockDataFetcher(max_retries=-1)
 
+#==========================================
+# 헬퍼 함수 (단일 fethcer)
+#==========================================
 
+#_fetch_single_by_period
 class TestStockDataFetcherSingleByPeriod:
     """Period 기반 단일 데이터 수집 테스트"""
 
@@ -207,7 +211,7 @@ class TestStockDataFetcherSingleByPeriod:
 
             assert result is None
 
-
+#_fetch_single_by_date
 class TestStockDataFetcherSingleByDate:
     """Date 기반 단일 데이터 수집 테스트"""
     #==========================================
@@ -404,6 +408,11 @@ class TestStockDataFetcherSingleByDate:
             assert result is None
 
 
+#==========================================
+# Fetcher 함수
+#==========================================
+
+#fetch_multiple_by_period
 class TestStockDataFetcherMultipleByPeriod:
     """Period 기반 병렬 수집 테스트"""
     #==========================================
@@ -494,7 +503,7 @@ class TestStockDataFetcherMultipleByPeriod:
             # 에러 발생하지 않은 쓰레드 정상 작동
             assert len(result) == 1
 
-
+#fetch_multiple_by_date
 class TestStockDataFetcherMultipleByDate:
     """Date 기반 병렬 수집 테스트"""
 

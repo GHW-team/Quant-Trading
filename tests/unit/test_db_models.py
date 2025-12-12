@@ -41,10 +41,12 @@ def temp_db():
         session.close()
         engine.dispose()
 
-
+# Ticker
 class TestTickerModel:
     """Ticker 모델 테스트"""
-
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_ticker_creation(self, temp_db):
         """Ticker 레코드 생성"""
         session, _ = temp_db
@@ -62,34 +64,6 @@ class TestTickerModel:
         assert result is not None
         assert result.name == '삼성전자'
         assert result.market == 'KOSPI'
-
-    def test_ticker_unique_constraint(self, temp_db):
-        """Ticker 코드 중복 제약"""
-        session, _ = temp_db
-
-        ticker1 = Ticker(ticker_code='005930.KS', name='삼성전자')
-        ticker2 = Ticker(ticker_code='005930.KS', name='다른회사')
-
-        session.add(ticker1)
-        session.commit()
-
-        session.add(ticker2)
-        with pytest.raises(IntegrityError):
-            session.commit()
-
-    def test_ticker_nullable_fields(self, temp_db):
-        """Ticker 선택적 필드"""
-        session, _ = temp_db
-
-        ticker = Ticker(ticker_code='005930.KS')  # name, market, sector 없음
-        session.add(ticker)
-        session.commit()
-
-        result = session.query(Ticker).filter_by(ticker_code='005930.KS').first()
-        assert result is not None
-        assert result.name is None
-        assert result.market is None
-        assert result.sector is None
 
     def test_ticker_repr(self, temp_db):
         """Ticker 문자열 표현"""
@@ -118,9 +92,41 @@ class TestTickerModel:
 
         assert t1.ticker_id is not None
         assert t2.ticker_id is not None
-        assert t1.ticker_id != t2.ticker_id
+        assert t1.ticker_id + 1 == t2.ticker_id
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
+    def test_ticker_nullable_fields(self, temp_db):
+        """Ticker 선택적 필드"""
+        session, _ = temp_db
 
+        ticker = Ticker(ticker_code='005930.KS')  # name, market, sector 없음
+        session.add(ticker)
+        session.commit()
 
+        result = session.query(Ticker).filter_by(ticker_code='005930.KS').first()
+        assert result is not None
+        assert result.name is None
+        assert result.market is None
+        assert result.sector is None
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
+    def test_ticker_unique_constraint(self, temp_db):
+        """Ticker 코드 중복 제약"""
+        session, _ = temp_db
+
+        ticker1 = Ticker(ticker_code='005930.KS', name='삼성전자')
+        ticker2 = Ticker(ticker_code='005930.KS', name='다른회사')
+
+        session.add(ticker1)
+        session.commit()
+
+        session.add(ticker2)
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+# DailyPrice
 class TestDailyPriceModel:
     """DailyPrice 모델 테스트"""
 
@@ -132,7 +138,9 @@ class TestDailyPriceModel:
         session.add(ticker)
         session.commit()
         return ticker
-
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_daily_price_creation(self, temp_db, sample_ticker):
         """DailyPrice 레코드 생성"""
         session, _ = temp_db
@@ -154,31 +162,9 @@ class TestDailyPriceModel:
         assert result is not None
         assert result.open == 50000
         assert result.close == 50500
-
-    def test_daily_price_unique_constraint(self, temp_db, sample_ticker):
-        """DailyPrice ticker_id + date 중복 제약"""
-        session, _ = temp_db
-
-        price1 = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=50000, high=51000, low=49000,
-            close=50500, adj_close=50500, volume=1000000
-        )
-        price2 = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=50100, high=51100, low=49100,
-            close=50600, adj_close=50600, volume=1100000
-        )
-
-        session.add(price1)
-        session.commit()
-
-        session.add(price2)
-        with pytest.raises(IntegrityError):
-            session.commit()
-
+    #==========================================
+    # 함수 엣지 케이스 테스트
+    #==========================================
     def test_daily_price_same_date_different_tickers(self, temp_db):
         """같은 날짜, 다른 ticker는 가능"""
         session, _ = temp_db
@@ -206,6 +192,32 @@ class TestDailyPriceModel:
 
         result = session.query(DailyPrice).count()
         assert result == 2
+    #==========================================
+    # 함수 에러 처리 테스트
+    #==========================================
+    def test_daily_price_unique_constraint(self, temp_db, sample_ticker):
+        """DailyPrice ticker_id + date 중복 제약"""
+        session, _ = temp_db
+
+        price1 = DailyPrice(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            open=50000, high=51000, low=49000,
+            close=50500, adj_close=50500, volume=1000000
+        )
+        price2 = DailyPrice(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            open=50100, high=51100, low=49100,
+            close=50600, adj_close=50600, volume=1100000
+        )
+
+        session.add(price1)
+        session.commit()
+
+        session.add(price2)
+        with pytest.raises(IntegrityError):
+            session.commit()
 
     def test_daily_price_retrieved_at_default(self, temp_db, sample_ticker):
         """retrieved_at 자동 설정"""
@@ -223,6 +235,7 @@ class TestDailyPriceModel:
         after = datetime.now(timezone.utc)
 
         result = session.query(DailyPrice).first()
+        retrieved_at = result.retrieved_at.replace(tzinfo=timezone.utc)
         assert result.retrieved_at is not None
         assert before <= result.retrieved_at <= after
 
@@ -312,7 +325,7 @@ class TestDailyPriceModel:
         assert result is not None
         assert abs(result.open - price_value) < 1  # 부동소수점 정밀도 허용
 
-
+# TechnicalIndicator
 class TestTechnicalIndicatorModel:
     """TechnicalIndicator 모델 테스트"""
 

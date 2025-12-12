@@ -36,6 +36,7 @@ def sample_df_with_indicators(sample_df_basic):
     ma_columns = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200']
     for col in ma_columns:
         window_size = int(col.split('_')[1])
+        # 주의: NaN값 포함됨
         df[col] = df['adj_close'].rolling(window=window_size).mean()
 
     # 2. MACD 관련 - 0 근처의 작은 소수값 할당
