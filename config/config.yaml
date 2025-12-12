@@ -7,23 +7,20 @@
 # 1. 데이터 소스 설정
 data:
   # 데이터 경로
-  database_path: "data/database/stocks.db"
+  database_path: "data/database/kospi.db"
 
   # 다운로드할 종목 리스트
   tickers:
-    - "005930.KS"    # 삼성전자
-    - "000660.KS"    # SK하이닉스
-    # - "051910.KS"    # LG화학
-    # - "207940.KS"    # SM Entertainment
+
   exchanges:
   #상장 인덱스
-  # - "KOSPI"
-  # - "S&P500"
+  - KOSPI
+
 
   # 데이터 기간 설정 (period 또는 start_date/end_date 중 하나)
   period:                               # null - start_date/end_date 사용
   start_date: "2020-01-01"              # 다운로드 시작일
-  end_date: "2023-12-31"                # 다운로드 종료일
+  end_date: "2025-12-03"                # 다운로드 종료일
 
   # 데이터 옵션
   update_if_exists: true                # DB 데이터 업데이트 여부
@@ -32,26 +29,32 @@ data:
 # 2. 지표 계산 설정
 indicators:
   # 계산할 지표 목록 (DB에 저장될 모든 지표)
+  #    - "ma_5"        # 5일 이동평균
+   # - "ma_10"
+   # - "ma_20"       # 20일 이동평균
+   # - "ma_50"
+   # - "ma_60"
+    #- "ma_100"
+   # - "ma_120"
+   # - "ma_200"      # 200일 이동평균
+   # - "macd"        # MACD
+    #- "macd_hist"
+   # - "macd_signal"
+   # - "rsi"
+   # - "bb_upper"
+    #- "bb_mid"
+    #- "bb_lower"
+    #- "bb_pct"
+    #- "atr"
+    #- "hv"
+    #- "obv"
   list:
-    - "ma_5"        # 5일 이동평균
-    - "ma_10"
-    - "ma_20"       # 20일 이동평균
-    - "ma_50"
-    - "ma_60"
-    - "ma_100"
-    - "ma_120"
-    - "ma_200"      # 200일 이동평균
-    - "macd"        # MACD
-    - "macd_hist"
-    - "macd_signal"
-    - "rsi"
-    - "bb_upper"
-    - "bb_mid"
-    - "bb_lower"
-    - "bb_pct"
-    - "atr"
-    - "hv"
-    - "obv"
+   - "log_ret"
+   - "ret_126d"
+   - "vol_20d"
+   - "mom_rank_pct"
+
+
 
   # 지표 계산 버전
   version: "v1.0"
@@ -62,11 +65,11 @@ indicators:
 
 # 3. 배치 처리 설정
 batch:
-  size: 100                             # 한 번에 처리할 종목 개수
+  size: 50                             # 한 번에 처리할 종목 개수
 
 # 4. 데이터 Fetcher 설정
 fetcher:
-  max_workers: 5                        # 병렬 처리 스레드 수
+  max_workers: 2                        # 병렬 처리 스레드 수
   max_retries: 3                        # 재시도 횟수
 
 # ==========================================
@@ -79,20 +82,20 @@ model:
   training:
     # 학습에 사용할 종목 (data.tickers의 부분집합)
     tickers:
-      - "005930.KS"    # 삼성전자
-      - "000660.KS"    # SK하이닉스
-      - "051910.KS"    # LG화학
-      - "207940.KS"    # SM Entertainment
+  
+    exchanges:
+    - KOSPI
 
     # 학습 데이터 기간 설정 (period 또는 start_date/end_date 중 하나)
     period:                             # null - start_date/end_date 사용
-    start_date: "2020-01-01"            # 학습 시작일 (data와 다를 수 있음)
-    end_date: "2023-12-31"              # 학습 종료일
+    start_date: "2015-01-01"            # 학습 시작일 (data와 다를 수 있음)
+    end_date: "2022-12-31"              # 학습 종료일
 
   # 라벨 생성 설정
   labeling:
-    horizon: 5                          # 예측 기간 (일) - N일 뒤 수익률 기준
-    threshold: 0.02                     # 수익률 임계값 (0.02 = 2%)
+    #horizon: 5                          # 예측 기간 (일) - N일 뒤 수익률 기준
+    #threshold: 0.02                     # 수익률 임계값 (0.02 = 2%)
+    breakout_window : 5
 
   # 학습에 사용할 피처
   features:

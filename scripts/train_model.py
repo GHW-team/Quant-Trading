@@ -6,12 +6,15 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
+
+
 # 프로젝트 루트 경로 추가 (src 모듈을 찾기 위함)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.pipeline import DataPipeline
 from src.ml.labeler import Labeler
 from src.ml.logistic_regression import LogisticRegressionHandler
+from src.data.all_ticker import TickerUniverse
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -29,12 +32,17 @@ def main():
 
     # model.training 설정
     tickers = config['model']['training']['tickers']
+    if not tickers:
+        exchanges = config['model']['training'].get('exchanges') or config['data'].get('exchanges')
+        if exchanges:
+            tickers = TickerUniverse().get(exchanges)
     period = config['model']['training'].get('period')
     start_date = config['model']['training'].get('start_date')
     end_date = config['model']['training'].get('end_date')
 
-    horizon = config['model']['labeling']['horizon']
-    threshold = config['model']['labeling']['threshold']
+   # horizon = config['model']['labeling']['horizon']
+   # threshold = config['model']['labeling']['threshold']
+    breakout_window = config['model']['labeling']['breakout_window']
 
     feature_columns = config['model']['features']['columns']
     indicator_list = config['model']['features']['indicators']
@@ -53,7 +61,7 @@ def main():
         logger.info(f"   - Period: {period}")
     else:
         logger.info(f"   - Date Range: {start_date} ~ {end_date}")
-    logger.info(f"   - Horizon: {horizon}, Threshold: {threshold:.1%}")
+    logger.info(f"   - Breakout window: {breakout_window}")
     logger.info(f"   - Features: {FEATURE_COLUMNS}\n")
 
     # ==========================================
@@ -94,9 +102,10 @@ def main():
     # ==========================================
     # 3. 라벨링 (Labeling)
     # ==========================================
-    logger.info(f"3. Labeling Data (Horizon={horizon}, Threshold={threshold:.1%})...")
+    #logger.info(f"3. Labeling Data (={horizon}, Threshold={threshold:.1%})...")
+    logger.info(f"3. Labeling Data (Breakout window = {breakout_window})...")
 
-    labeler = Labeler(horizon=horizon, threshold=threshold)
+    labeler = Labeler(breakout_window = breakout_window)
     df_labeled = labeler.label_data(df_all, price_col='adj_close')
 
     # ==========================================

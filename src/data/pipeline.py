@@ -262,11 +262,14 @@ class DataPipeline:
                 batch_calculated_dict = {}
                 try:
                     logger.info(f"Step 3: Calculating indicators for batch {batch_num}...")
+                    indicator_list_for_calc = indicator_list
+                    if indicator_list is not None:
+                        indicator_list_for_calc = [ind for ind in indicator_list if ind != "mom_rank_pct"]
                     for ticker, df in batch_df_dict.items():
                         try:
                             calculated_df = self.calculator.calculate_indicators(
                                 df=df,
-                                indicator_list=indicator_list
+                                indicator_list=indicator_list_for_calc
                             )
 
                             batch_calculated_dict[ticker] = calculated_df
@@ -282,6 +285,37 @@ class DataPipeline:
                 except Exception as e:
                     logger.error(f"Failed to calculate indicators for batch {batch_num}: {e}")
                     continue
+
+                if batch_calculated_dict:
+                    # ret_126d 계산 후 상대 모멘텀 측정
+                    concat_df = (
+                        pd.concat(
+                            [
+                                df.assign(ticker=tkr)
+                                for tkr, df in batch_calculated_dict.items()
+                                if 'ret_126d' in df.columns
+                            ],
+                            axis=0
+                        )
+                    )
+                    if not concat_df.empty and 'date' in concat_df.columns:
+                        concat_df['mom_rank_pct'] = (
+                            concat_df.groupby('date')['ret_126d'].rank(pct=True)
+                        )
+                        # 다시 티커별로 되돌리기
+                        for tkr, df in batch_calculated_dict.items():
+                            df_merged = (
+                                df.copy()
+                                .assign(ticker=tkr)
+                                .merge(
+                                    concat_df[['date', 'ticker', 'mom_rank_pct']],
+                                    on=['date', 'ticker'],
+                                    how='left',
+                                )
+                                .drop(columns=['ticker'])
+                            )
+                            batch_calculated_dict[tkr] = df_merged
+                                
 
                 # Step 4: Save indicators (original_start_date 기준으로 필터링)
                 try:

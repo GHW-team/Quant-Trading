@@ -79,6 +79,10 @@ class TechnicalIndicator(Base):
     stoch_k = Column(Float)
     stoch_d = Column(Float)
     obv = Column(Float)
+    log_ret = Column(Float) # 변동성 타겟팅 전략에 사용
+    ret_126d = Column(Float) # 변동성 타겟팅 전략에 사용
+    vol_20d = Column(Float) # 변동성 타겟팅 전략에 사용
+    mom_rank_pct = Column(Float) # 변동성 타겟팅 전략에 사용
     calculated_version = Column(String(30),default='v1.0')
     calculated_at = Column(DateTime(timezone=True), default=get_utc_now)
 

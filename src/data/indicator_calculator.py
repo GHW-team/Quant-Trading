@@ -57,6 +57,18 @@ class IndicatorCalculator:
     def _calc_obv(df: pd.DataFrame)->pd.Series:
         return ta.obv(df['close'], df['volume'])
     
+    @staticmethod
+    def _calc_log_ret(df: pd.DataFrame) -> pd.Series:
+        return np.log(df['adj_close']).diff()
+    
+    @staticmethod
+    def _calc_ret(df: pd.DataFrame, length: int) -> pd.Series:
+        return df['adj_close'].pct_change(length)
+    
+    @staticmethod
+    def _calc_vol_rolling(df: pd.DataFrame, length: int, annual_factor: int = 252) -> pd.Series:
+        log_ret = IndicatorCalculator._calc_log_ret(df)
+        return log_ret.rolling(length).std() * np.sqrt(annual_factor)
 
     #rsi,볼린저밴드,atr,hv,스토캐스틱 등은 현재 기본값으로 설정해뒀으니 이 값을 바꿀 경우 이름을 바꿔주기바람
     #ex) 볼린저밴드의 이동평균선을 50일, 표준편차 2를 사용할 경우: bb_upper_50_2
@@ -81,7 +93,10 @@ class IndicatorCalculator:
         "hv":   lambda df: IndicatorCalculator._calc_hv(df, 20, 252),
         'stoch_k': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 0],
         'stoch_d': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 1],
-        'obv':     lambda df: IndicatorCalculator._calc_obv(df)
+        'obv':     lambda df: IndicatorCalculator._calc_obv(df),
+        'log_ret': lambda df: IndicatorCalculator._calc_log_ret(df),
+        'ret_126d': lambda df: IndicatorCalculator._calc_ret(df, 126),
+        'vol_20d': lambda df: IndicatorCalculator._calc_vol_rolling(df, 20, 252),
     }
 
     def __init__(self):
@@ -123,7 +138,10 @@ class IndicatorCalculator:
             'hv' : 20,               #HV 기본값 
             'stoch_k' : 14,          #스토캐스틱 기본값: k=14,d=3
             'stoch_d' : 14,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
-            'obv' : 1
+            'obv' : 1,
+            'log_ret' : 2,
+            'ret_126d' : 126,
+            'vol_20d' : 20
         }
 
         # 요청한 지표 중 최대 lookback 일수 구하기

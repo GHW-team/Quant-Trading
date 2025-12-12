@@ -252,3 +252,15 @@ docker-compose.override.yml
 
 #클로드 개인설정
 .claude/
+logs/*.log
+plots/*.csv
+plots/*.png
+
+#데이터
+data/database/*.db
+data/raw/*.csv
+data/tickers/*.csv
+*.parquet
+
+# 모델 아웃풋
+models/*.pkl

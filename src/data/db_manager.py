@@ -182,7 +182,7 @@ class DatabaseManager:
         """
         results = {}
         indicators = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_hist', 'macd_signal',
-                      'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct', 'atr', 'hv', 'stoch_k', 'stoch_d', 'obv']
+                      'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct', 'atr', 'hv', 'stoch_k', 'stoch_d', 'obv', 'log_ret', 'ret_126d', 'vol_20d', 'mom_rank_pct']
 
         ticker_ids = {}
         for ticker_code in indicator_data_dict.keys():
@@ -202,21 +202,30 @@ class DatabaseManager:
                     # 사용 가능한 지표만 선택
                     available_indicators = [ind for ind in indicators if ind in df.columns]
                     df_save = df[available_indicators + ['date']].copy()
+                    df_save['date'] = pd.to_datetime(df_save['date']).dt.date  # tz 제거, 날짜만
                     df_save['ticker_id'] = ticker_id
                     df_save['calculated_version'] = version
                     df_save = df_save.replace({np.nan: None})
 
                     records = df_save.to_dict(orient='records')
 
-                    stmt = sqlite_insert(TechnicalIndicator.__table__).values(records)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=['ticker_id', 'date'],
-                        set_={ind: stmt.excluded[ind] for ind in available_indicators},
-                    )
+                    # SQLite 바인딩 한도(기본 999) 회피: 청크로 나눠 저장
+                    cols_per_row = len(available_indicators) + 3  # date, ticker_id, calculated_version
+                    max_rows_per_chunk = max(1, 900 // max(cols_per_row, 1))
 
-                    conn.execute(stmt)
-                    results[ticker_code] = len(records)
-                    logger.debug(f"✓ Bulk saved {len(records)} indicator records for {ticker_code}")
+                    saved = 0
+                    for i in range(0, len(records), max_rows_per_chunk):
+                        chunk = records[i:i + max_rows_per_chunk]
+                        stmt = sqlite_insert(TechnicalIndicator.__table__).values(chunk)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['ticker_id', 'date'],
+                            set_={ind: stmt.excluded[ind] for ind in available_indicators},
+                        )
+                        conn.execute(stmt)
+                        saved += len(chunk)
+
+                    results[ticker_code] = saved
+                    logger.debug(f"✓ Bulk saved {saved} indicator records for {ticker_code}")
 
                 except Exception as e:
                     logger.error(f"✗ Failed to save indicators for {ticker_code}: {e}")

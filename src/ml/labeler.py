@@ -4,17 +4,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+#주가가 20일 신고가 돌파시 매수하는 모델. 매수 조건은 단순화시키고 리스크 관리에 집중해서 손실을 줄이는게 목적
 class Labeler:
     """
-    고정 기간 수익률 기반 라벨링 클래스
+    20일 신고가 돌파 라벨링
 
     Parameters:
-    - horizon: 미래 기간 (일) - 기본값 5
-    - threshold: 수익률 임계값 - 기본값 0.02 (2%)
+    - breakout_window : 신고가 판단 기간(기본 20일)
     """
-    def __init__(self, horizon: int = 5, threshold: float = 0.02):
-        self.horizon = horizon      # N일 뒤 (예: 5일)
-        self.threshold = threshold  # 목표 수익률 (예: 2%)
+    def __init__(self, breakout_window: int=20):
+        self.breakout_window = breakout_window
 
     def label_data(self, df: pd.DataFrame, price_col: str = 'adj_close') -> pd.DataFrame:
         """
@@ -32,28 +32,28 @@ class Labeler:
         elif not df.index.is_monotonic_increasing:
             df = df.sort_index()
 
-        # 1. 미래 가격 가져오기 (shift 음수는 위로 당김)
-        future_close = df[price_col].shift(-self.horizon)
+        # 1. 최근 20일 내 신고가 계산 (shift(1)로 오늘 값이 들어가서 예견편향이 발생하는걸 방지함.)
+        prev_high = (
+            df[price_col]
+            .rolling(window = self.breakout_window, min_periods = self.breakout_window)
+            .max()
+            .shift(1) #lookahead bias 방지
+        )
         
-        # 2. 수익률 계산: (미래가격 - 현재가격) / 현재가격
-        df['return_n'] = (future_close - df[price_col]) / df[price_col]
-        
-        # 3. 라벨링: 수익률 >= 2% 이면 1, 아니면 0
-        # NaN(미래 데이터 없음)은 0으로 처리하거나 나중에 dropna() 해야 함.
-        # 여기서는 계산 가능한 구간만 1/0 처리하고 나머지는 NaN 유지
-        df['label'] = (df['return_n'] >= self.threshold).astype(int)
-        
-        # 마지막 horizon 기간은 미래를 알 수 없으므로 NaN 처리
-        df.loc[df.index[-self.horizon:], 'label'] = np.nan
+        # 2. 라벨링: 주가가 20일 신고가를 갱신하면 1, 아니면 0
+        # 가격 데이터가 20개 미만인 경우는 NaN처리
+        df['label'] = np.where(df[price_col] >= prev_high, 1.0, 0.0)
+        df.loc[prev_high.isna(), "label"] = np.nan
 
-        #['retrun_n']수익률 컬럼 제거
-        df.drop(columns=['return_n'], inplace=True)
-        
-        # 통계 로그
-        valid_data = df.dropna(subset=['label'])
-        pos_ratio = valid_data['label'].mean()
-        logger.info(f"Labeling Complete (N={self.horizon}, K={self.threshold:.1%})")
-        logger.info(f"  - Total: {len(valid_data)} rows")
-        logger.info(f"  - Up(1): {pos_ratio:.1%} | Down/Neutral(0): {1-pos_ratio:.1%}")
+
+        #통계 로그
+        valid = df.dropna(subset=['label']) # NaN처리된 데이터를 제외한 유효 데이터
+        pos_ratio = valid['label'].mean() if not valid.empty else 0.0
+        logger.info(
+            "Labeling Complete (breakout_window=%d)\n  - Total: %d rows\n  - Breakout(1): %.1f%%",
+            self.breakout_window,
+            len(valid),
+            pos_ratio * 100,
+        )
 
         return df

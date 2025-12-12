@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 import numpy as np
 import joblib
 import logging
@@ -55,7 +55,7 @@ class LogisticRegressionHandler:
             estimator=LogisticRegression(random_state=42),
             param_grid=param_grid,
             cv=cv,
-            scoring='accuracy', #모델 평가 기준
+            scoring='roc_auc', #모델 평가 기준
             n_jobs=-1, #cpu 코어 수 조절
             verbose=1 #로그 깊이
         )
