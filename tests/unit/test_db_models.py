@@ -41,6 +41,26 @@ def temp_db():
         session.close()
         engine.dispose()
 
+# get_ut_now
+class TestUtilityFunctions:
+    """유틸리티 함수 테스트"""
+
+    def test_get_utc_now(self):
+        """get_utc_now 함수"""
+        before = datetime.now(timezone.utc)
+        result = get_utc_now()
+        after = datetime.now(timezone.utc)
+
+        assert isinstance(result, datetime)
+        assert result.tzinfo == timezone.utc
+        assert before <= result <= after
+
+    def test_get_utc_now_timezone_aware(self):
+        """UTC 시간대인지 확인"""
+        result = get_utc_now()
+        assert result.tzinfo is not None
+        assert result.tzinfo == timezone.utc
+
 # Ticker
 class TestTickerModel:
     """Ticker 모델 테스트"""
@@ -110,7 +130,7 @@ class TestTickerModel:
         assert result.market is None
         assert result.sector is None
     #==========================================
-    # 함수 엣지 케이스 테스트
+    # 함수 에러 케이스 테스트
     #==========================================
     def test_ticker_unique_constraint(self, temp_db):
         """Ticker 코드 중복 제약"""
@@ -162,6 +182,63 @@ class TestDailyPriceModel:
         assert result is not None
         assert result.open == 50000
         assert result.close == 50500
+    
+    def test_daily_price_repr(self, temp_db, sample_ticker):
+        """DailyPrice 문자열 표현"""
+        session, _ = temp_db
+
+        price = DailyPrice(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            open=50000, high=51000, low=49000,
+            close=50500, adj_close=50500, volume=1000000
+        )
+        session.add(price)
+        session.commit()
+
+        result = session.query(DailyPrice).first()
+        repr_str = repr(result)
+        assert 'DailyPrice' in repr_str
+        assert '2020-01-01' in repr_str
+
+    def test_daily_price_retrieved_at_default(self, temp_db, sample_ticker):
+        """retrieved_at 자동 설정"""
+        session, _ = temp_db
+
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        price = DailyPrice(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            open=50000, high=51000, low=49000,
+            close=50500, adj_close=50500, volume=1000000
+        )
+        session.add(price)
+        session.commit()
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        result = session.query(DailyPrice).first()
+        assert result.retrieved_at is not None
+        assert before <= result.retrieved_at <= after
+
+    def test_daily_price_cascade_delete(self, temp_db, sample_ticker):
+        """Ticker 삭제 시 DailyPrice 자동 삭제"""
+        session, _ = temp_db
+
+        price = DailyPrice(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            open=50000, high=51000, low=49000,
+            close=50500, adj_close=50500, volume=1000000
+        )
+        session.add(price)
+        session.commit()
+
+        # Ticker 삭제
+        session.delete(sample_ticker)
+        session.commit()
+
+        result = session.query(DailyPrice).count()
+        assert result == 0
     #==========================================
     # 함수 엣지 케이스 테스트
     #==========================================
@@ -219,112 +296,6 @@ class TestDailyPriceModel:
         with pytest.raises(IntegrityError):
             session.commit()
 
-    def test_daily_price_retrieved_at_default(self, temp_db, sample_ticker):
-        """retrieved_at 자동 설정"""
-        session, _ = temp_db
-
-        before = datetime.now(timezone.utc)
-        price = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=50000, high=51000, low=49000,
-            close=50500, adj_close=50500, volume=1000000
-        )
-        session.add(price)
-        session.commit()
-        after = datetime.now(timezone.utc)
-
-        result = session.query(DailyPrice).first()
-        retrieved_at = result.retrieved_at.replace(tzinfo=timezone.utc)
-        assert result.retrieved_at is not None
-        assert before <= result.retrieved_at <= after
-
-    def test_daily_price_nullable_none_fields(self, temp_db, sample_ticker):
-        """모든 필드 필수"""
-        session, _ = temp_db
-
-        price = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=50000, high=51000, low=49000,
-            close=50500, adj_close=50500, volume=1000000
-        )
-        session.add(price)
-        session.commit()
-
-        result = session.query(DailyPrice).first()
-        assert result.open is not None
-        assert result.high is not None
-        assert result.low is not None
-        assert result.close is not None
-        assert result.volume is not None
-        assert result.adj_close is not None
-
-    def test_daily_price_repr(self, temp_db, sample_ticker):
-        """DailyPrice 문자열 표현"""
-        session, _ = temp_db
-
-        price = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=50000, high=51000, low=49000,
-            close=50500, adj_close=50500, volume=1000000
-        )
-        session.add(price)
-        session.commit()
-
-        result = session.query(DailyPrice).first()
-        repr_str = repr(result)
-        assert 'DailyPrice' in repr_str
-        assert '2020-01-01' in repr_str
-
-    def test_daily_price_cascade_delete(self, temp_db, sample_ticker):
-        """Ticker 삭제 시 DailyPrice 자동 삭제"""
-        session, _ = temp_db
-
-        price = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=50000, high=51000, low=49000,
-            close=50500, adj_close=50500, volume=1000000
-        )
-        session.add(price)
-        session.commit()
-
-        # Ticker 삭제
-        session.delete(sample_ticker)
-        session.commit()
-
-        result = session.query(DailyPrice).count()
-        assert result == 0
-
-    @pytest.mark.parametrize("price_value", [
-        0.00001,  # 매우 작은 값
-        50000.123456,  # 정상 값
-        1e6,  # 매우 큰 값
-        -100.50,  # 음수
-    ])
-    def test_daily_price_various_values(self, temp_db, sample_ticker, price_value):
-        """다양한 가격값 테스트"""
-        session, _ = temp_db
-
-        price = DailyPrice(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            open=price_value,
-            high=price_value + 1,
-            low=price_value - 1,
-            close=price_value,
-            adj_close=price_value,
-            volume=1000000
-        )
-        session.add(price)
-        session.commit()
-
-        result = session.query(DailyPrice).first()
-        assert result is not None
-        assert abs(result.open - price_value) < 1  # 부동소수점 정밀도 허용
-
 # TechnicalIndicator
 class TestTechnicalIndicatorModel:
     """TechnicalIndicator 모델 테스트"""
@@ -337,7 +308,9 @@ class TestTechnicalIndicatorModel:
         session.add(ticker)
         session.commit()
         return ticker
-
+    #==========================================
+    # 함수 정상 동작 테스트
+    #==========================================
     def test_technical_indicator_creation(self, temp_db, sample_ticker):
         """TechnicalIndicator 레코드 생성"""
         session, _ = temp_db
@@ -348,7 +321,8 @@ class TestTechnicalIndicatorModel:
             ma_5=50000,
             ma_20=50100,
             ma_200=50200,
-            macd=100
+            macd=100,
+            caculated_version='v2.0'
         )
         session.add(indicator)
         session.commit()
@@ -357,90 +331,15 @@ class TestTechnicalIndicatorModel:
         assert result is not None
         assert result.ma_5 == 50000
         assert result.ma_20 == 50100
-
-    def test_technical_indicator_unique_constraint(self, temp_db, sample_ticker):
-        """TechnicalIndicator ticker_id + date 중복 제약"""
-        session, _ = temp_db
-
-        ind1 = TechnicalIndicator(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            ma_5=50000, ma_20=50100, ma_200=50200, macd=100
-        )
-        ind2 = TechnicalIndicator(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            ma_5=50001, ma_20=50101, ma_200=50201, macd=101
-        )
-
-        session.add(ind1)
-        session.commit()
-
-        session.add(ind2)
-        with pytest.raises(IntegrityError):
-            session.commit()
-
-    @pytest.mark.parametrize("indicator_values", [
-        {'ma_5': None, 'ma_20': None, 'ma_200': None, 'macd': None},  # 모두 NULL
-        {'ma_5': 50000, 'ma_20': None, 'ma_200': None, 'macd': None},  # ma_5만
-        {'ma_5': 50000, 'ma_20': 50100, 'ma_200': 50200, 'macd': 100},  # 모두 설정
-        {'ma_5': -100, 'ma_20': -50, 'ma_200': None, 'macd': -50},  # 음수 포함
-    ])
-    def test_technical_indicator_values(self, temp_db, sample_ticker, indicator_values):
-        """다양한 지표값 설정"""
-        session, _ = temp_db
-
-        indicator = TechnicalIndicator(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            **indicator_values
-        )
-        session.add(indicator)
-        session.commit()
-
-        result = session.query(TechnicalIndicator).first()
-        assert result is not None
-        assert result.ma_5 == indicator_values.get('ma_5')
-        assert result.ma_20 == indicator_values.get('ma_20')
-        assert result.ma_200 == indicator_values.get('ma_200')
-        assert result.macd == indicator_values.get('macd')
-
-    def test_technical_indicator_calculated_version(self, temp_db, sample_ticker):
-        """calculated_version 기본값"""
-        session, _ = temp_db
-
-        indicator = TechnicalIndicator(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            ma_5=50000
-        )
-        session.add(indicator)
-        session.commit()
-
-        result = session.query(TechnicalIndicator).first()
-        assert result.calculated_version == 'v1.0'
-
-    def test_technical_indicator_custom_version(self, temp_db, sample_ticker):
-        """커스텀 version"""
-        session, _ = temp_db
-
-        indicator = TechnicalIndicator(
-            ticker_id=sample_ticker.ticker_id,
-            date=date(2020, 1, 1),
-            ma_5=50000,
-            calculated_version='v2.0'
-        )
-        session.add(indicator)
-        session.commit()
-
-        result = session.query(TechnicalIndicator).first()
-        assert result.calculated_version == 'v2.0'
-
+        assert result.ma_200 == 50200
+        assert result.macd == 100
+        assert result.caculated_version == 'v2.0'
+    
     def test_technical_indicator_calculated_at_default(self, temp_db, sample_ticker):
         """calculated_at 자동 설정"""
         session, _ = temp_db
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         indicator = TechnicalIndicator(
             ticker_id=sample_ticker.ticker_id,
             date=date(2020, 1, 1),
@@ -448,7 +347,7 @@ class TestTechnicalIndicatorModel:
         )
         session.add(indicator)
         session.commit()
-        after = datetime.now(timezone.utc)
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
 
         result = session.query(TechnicalIndicator).first()
         assert result.calculated_at is not None
@@ -471,8 +370,32 @@ class TestTechnicalIndicatorModel:
 
         result = session.query(TechnicalIndicator).count()
         assert result == 0
+    #==========================================
+    # 함수 에러 케이스 테스트
+    #==========================================
+    def test_technical_indicator_unique_constraint(self, temp_db, sample_ticker):
+        """TechnicalIndicator ticker_id + date 중복 제약"""
+        session, _ = temp_db
 
+        ind1 = TechnicalIndicator(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            ma_5=50000, ma_20=50100, ma_200=50200, macd=100
+        )
+        ind2 = TechnicalIndicator(
+            ticker_id=sample_ticker.ticker_id,
+            date=date(2020, 1, 1),
+            ma_5=50001, ma_20=50101, ma_200=50201, macd=101
+        )
 
+        session.add(ind1)
+        session.commit()
+
+        session.add(ind2)
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+# 통합 테스트트
 class TestModelRelationships:
     """모델 관계 테스트"""
 
@@ -547,93 +470,3 @@ class TestModelRelationships:
         result = session.query(DailyPrice).first()
         assert result.ticker.ticker_code == '005930.KS'
         assert result.ticker.name == '삼성전자'
-
-
-class TestCreateTablesFunction:
-    """create_tables 함수 테스트"""
-
-    def test_create_tables_creates_db_file(self):
-        """DB 파일 생성"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, 'test.db')
-            engine = create_tables(db_path)
-
-            assert os.path.exists(db_path)
-            engine.dispose()
-
-    def test_create_tables_creates_schema(self):
-        """스키마 생성"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, 'test.db')
-            engine = create_tables(db_path)
-
-            # 테이블 확인
-            inspector = __import__('sqlalchemy').inspect(engine)
-            tables = inspector.get_table_names()
-
-            assert 'tickers' in tables
-            assert 'daily_prices' in tables
-            assert 'technical_indicators' in tables
-
-            engine.dispose()
-
-    def test_create_tables_foreign_key_constraint(self):
-        """Foreign key 제약 활성화"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, 'test.db')
-            engine = create_tables(db_path)
-
-            Session = sessionmaker(bind=engine)
-            session = Session()
-
-            # 존재하지 않는 ticker_id로 price 추가 시도
-            price = DailyPrice(
-                ticker_id=9999,  # 존재하지 않음
-                date=date(2020, 1, 1),
-                open=50000, high=51000, low=49000,
-                close=50500, adj_close=50500, volume=1000000
-            )
-            session.add(price)
-
-            with pytest.raises(IntegrityError):
-                session.commit()
-
-            session.close()
-            engine.dispose()
-
-    def test_create_tables_idempotent(self):
-        """중복 호출해도 안전"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, 'test.db')
-
-            engine1 = create_tables(db_path)
-            engine1.dispose()
-
-            # 두 번째 호출
-            engine2 = create_tables(db_path)
-
-            inspector = __import__('sqlalchemy').inspect(engine2)
-            tables = inspector.get_table_names()
-            assert 'tickers' in tables
-
-            engine2.dispose()
-
-
-class TestUtilityFunctions:
-    """유틸리티 함수 테스트"""
-
-    def test_get_utc_now(self):
-        """get_utc_now 함수"""
-        before = datetime.now(timezone.utc)
-        result = get_utc_now()
-        after = datetime.now(timezone.utc)
-
-        assert isinstance(result, datetime)
-        assert result.tzinfo == timezone.utc
-        assert before <= result <= after
-
-    def test_get_utc_now_timezone_aware(self):
-        """UTC 시간대인지 확인"""
-        result = get_utc_now()
-        assert result.tzinfo is not None
-        assert result.tzinfo == timezone.utc

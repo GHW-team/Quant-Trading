@@ -90,7 +90,6 @@ class TechnicalIndicator(Base):
         Index('idx_ticker_date_ind', 'ticker_id','date'),
     )
 
-
 def create_tables(db_path: str = 'data/database/stocks.db'):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
