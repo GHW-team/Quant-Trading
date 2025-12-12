@@ -8,33 +8,51 @@ import pandas as pd
 import numpy as np
 from src.data.indicator_calculator import IndicatorCalculator
 
-
+# get_lookback_days
 class TestIndicatorCalculatorGetLookbackDays:
     """lookback 일수 계산 테스트"""
 
     @pytest.mark.parametrize("indicators,expected_min", [
         (['ma_5'], 5),
+        (['ma_10'], 10),
         (['ma_20'], 20),
+        (['ma_50'], 50),
+        (['ma_60'], 60),
+        (['ma_100'], 100),
+        (['ma_120'], 120),
         (['ma_200'], 200),
         (['macd'], 26),
+        (['macd_signal'], 26),
+        (['macd_hist'], 26),
+        (['rsi'], 14),
+        (['bb_upper'], 20),
+        (['bb_mid'], 20),
+        (['bb_lower'], 20),
+        (['bb_pct'], 20),
+        (['atr'], 14),
+        (['hv'], 20),
+        (['stoch_k'], 14),
+        (['stoch_d'], 14),
+        (['obv'], 1),
         (['unkown'], 0),
     ])
     def test_lookback_for_single_indicator(self, indicators, expected_min):
         """단일 지표 lookback 계산"""
         lookback = IndicatorCalculator.get_lookback_days(indicators)
-        assert lookback >= expected_min
+        assert lookback == expected_min + 5
 
+    @pytest.mark.parametrize("indicators,expected_min", [
+        (['ma_5','ma_10','ma_20','ma_50','ma_60','ma_100'], 100),
+        (['ma_120','ma_200','macd','macd_signal','macd_hist'], 200),
+        (['rsi','bb_upper','bb_mid','bb_lower','bb_pct'], 20),
+        (['atr','hv','stoch_k','stoch_d','obv','unknown'], 20),
+    ])
+    def test_lookback_for_multiple_indicator(self, indicators, expected_min):
+        """다중 지표 lookback 계산"""
+        lookback = IndicatorCalculator.get_lookback_days(indicators)
+        assert lookback == expected_min + 5
 
-class TestIndicatorCalculatorInitialization:
-    """IndicatorCalculator 초기화 테스트"""
-
-    def test_initialization(self):
-        """초기화"""
-        calc = IndicatorCalculator()
-        assert calc is not None
-        assert hasattr(calc, 'calculated_indicators')
-
-
+# 
 class TestIndicatorCalculatorCalculateIndicators:
     """지표 계산 메인 메서드 테스트"""
 
