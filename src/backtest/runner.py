@@ -245,7 +245,13 @@ class BacktestRunner:
     def _plot(self, save_path: Optional[str] = None):
         """차트 출력/저장"""
         try:
-            plt.rcParams['figure.figsize'] = [14, 25]  # 가로 14인치, 세로 25인치로 설정
+            # 데이터 피드 개수에 따라 차트 높이 동적 조정
+            num_feeds = len(self.cerebro.datas)
+            height = max(40, num_feeds * 3)  # 종목당 3인치, 최소 40인치
+
+            plt.rcParams['figure.figsize'] = [16, height]  # 가로 16인치, 세로 동적 설정
+            plt.rcParams['font.size'] = 8  # 폰트 크기 줄이기
+
             # Backtrader 기본 플롯
             figs = self.cerebro.plot(
                 style='candlestick',
@@ -253,9 +259,10 @@ class BacktestRunner:
                 bardown='blue',
                 volup='lightcoral',
                 voldown='blue',
-                volume=True,
-                subplot=True,
-                iplot=False, 
+                volume=False,  # 거래량 차트 제거로 공간 절약
+                subplot=False,  # 각 종목을 별도 서브플롯으로
+                iplot=False,
+                numfigs=1,  # 단일 figure로 통합
             )
             
             if save_path:

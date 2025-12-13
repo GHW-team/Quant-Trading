@@ -21,6 +21,7 @@ from src.backtest.strategy import MLSignalStrategy, BuyAndHoldStrategy
 from src.data.db_manager import DatabaseManager
 from src.ml.logistic_regression import LogisticRegressionHandler
 from src.data.pipeline import DataPipeline
+from src.data.all_ticker import TickerUniverse
 
 CONFIG_PATH = "config/backtest.yaml"
 
@@ -86,8 +87,12 @@ def generate_ml_signals(
     feature_columns = handler.feature_names
 
     #티커리스트 불러오기
-    ticker_list = df_dict.keys()
-    
+    ticker_list = list(df_dict.keys())
+
+    logger.info(f"📊 총 {len(ticker_list)}개 티커에 대해 ML 신호 생성 시작")
+    success_count = 0
+    fail_count = 0
+
     for ticker in ticker_list:
         try:
             df = df_dict[ticker]
@@ -97,11 +102,10 @@ def generate_ml_signals(
 
             # NaN 검사
             if X.isnull().any().any():
-                nan_report = X.isnull().sum()
-                nan_report = nan_report[nan_report > 0]
-                logger.error(f"🛑 [Data Integrity Error] {ticker}")
-                logger.error(f"상세 내역:\n{nan_report}")                
-                raise ValueError(f"{ticker}: 데이터 무결성 위반 (NaN포함됨)")
+                nan_count = X.isnull().sum().sum()
+                nan_cols = X.isnull().any()
+                nan_cols = nan_cols[nan_cols].index.tolist()
+                raise ValueError(f"{ticker}: NaN 발견 (총 {nan_count}개, 컬럼: {nan_cols})")
 
             # 예측
             predictions = handler.predict(X,threshold = 0.57)
@@ -119,11 +123,14 @@ def generate_ml_signals(
             buy_signals = (signal_series == 1).sum()
             total_days = len(signal_series)
             logger.info(f"{ticker}: {buy_signals}/{total_days} 매수 신호 ({buy_signals/total_days:.1%})")
-            
+            success_count += 1
+
         except Exception as e:
-            logger.error(f"{ticker}: 신호 생성 실패 - {e}")
+            logger.warning(f"{ticker}: 신호 생성 실패 - {e}")
+            fail_count += 1
             continue
-    
+
+    logger.info(f"✅ 신호 생성 완료 - 성공: {success_count}개, 실패: {fail_count}개")
     return signals
 
 # ============================================
@@ -144,7 +151,14 @@ def main():
     data_config = config['data']
 
     db_path = data_config['db_path']
-    ticker_codes = data_config['ticker_codes']
+    ticker_codes = TickerUniverse().get(['KOSPI'])[:50]
+
+    # 임시: 데이터 부족한 종목 제외
+    exclude_tickers = ['499790.KS', '017860.KS']
+    ticker_codes = [t for t in ticker_codes if t not in exclude_tickers]
+
+    #임시
+    #data_config['ticker_codes']
     start_date = data_config['start_date']
     end_date = data_config['end_date']
     indicator_list = data_config['indicator_list']
@@ -204,9 +218,25 @@ def main():
 
         # ============ df와 signal 통합 =============
         logger.info("\n🔗 DataFrame과 ML 신호 병합 중...")
+
+        # 신호가 있는 티커만 처리할 새로운 df_dict 생성
+        updated_df_dict = {}
+
         for ticker in ticker_codes:
+            #임시
+            # df_dict에 없는 티커는 건너뛰기 (데이터가 없는 경우)
+            if ticker not in df_dict:
+                logger.warning(f"{ticker}: df_dict에 없어 건너뜁니다")
+                continue
+
             df = df_dict[ticker]
             signal = signals.get(ticker)
+
+            #임시
+            # 신호가 없는 티커는 건너뛰기 (백테스트에서 제외)
+            if signal is None:
+                logger.warning(f"{ticker}: 신호가 없어 백테스트에서 제외합니다")
+                continue
 
             # signal은 DatetimeIndex를 가진 Series
             # df는 'date' 컬럼을 가진 DataFrame
@@ -221,10 +251,16 @@ def main():
             # 병합 (left join - df의 모든 날짜 유지)
             df = pd.merge(df, signal_df, on='date', how='left')
 
-            # 업데이트된 df를 다시 저장
-            df_dict[ticker] = df
+            # NaN이 있으면 0으로 채우기 (신호가 없는 날은 매수하지 않음)
+            df['signal'] = df['signal'].fillna(0)
 
-        logger.info(f"신호 병합 완료 ")
+            # 업데이트된 df_dict에 저장
+            updated_df_dict[ticker] = df
+
+        # 원래 df_dict를 업데이트된 버전으로 교체
+        df_dict = updated_df_dict
+
+        logger.info(f"신호 병합 완료: {len(df_dict)}개 종목")
         
         # ============ 백테스트 실행 ============
         runner = BacktestRunner(
@@ -262,4 +298,9 @@ def main():
 
 
 if __name__ == "__main__":
+    ticker_univ = TickerUniverse()
+    kospi_all_ticker = ticker_univ.get(["KOSPI"])
+    print(f"코스피 티커 개수: {len(kospi_all_ticker)}")
+    print(f"코스피 티커 리스트 head: {kospi_all_ticker[50:]}")
+    print(f"코스피 티커 리스트 tail: {kospi_all_ticker[:-50]}")
     main()
