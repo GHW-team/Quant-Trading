@@ -102,6 +102,7 @@ class IndicatorCalculator:
             indicator_list = list(IndicatorCalculator.INDICATORS_FUNCTIONS.keys())
 
         # 지표별 필요한 과거 기간
+        # 엄밀한 정의 : pandas-ta-classic 라이브러리가 유효 값 1개를 얻기 위한 최소 데이터 수
         lookback_map = {
             'ma_5': 5,
             'ma_10': 10,
@@ -112,17 +113,17 @@ class IndicatorCalculator:
             'ma_120': 120,
             'ma_200': 200,
             'macd': 26,              # slow period
-            'macd_signal': 26,
-            'macd_hist': 26,
-            'rsi': 14,               # RSI 기본값 (향후 추가 가능)
+            'macd_signal': 34,
+            'macd_hist': 34,
+            'rsi': 15,               # RSI 기본값 (향후 추가 가능)
             'bb_upper': 20,          #볼린저밴드 기본값
             'bb_mid': 20,
             'bb_lower': 20,
             'bb_pct': 20,
-            'atr' : 14,              #ATR 기본값
-            'hv' : 20,               #HV 기본값 
-            'stoch_k' : 14,          #스토캐스틱 기본값: k=14,d=3
-            'stoch_d' : 14,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
+            'atr' : 15,              #ATR 기본값
+            'hv' : 21,               #HV 기본값 
+            'stoch_k' : 16,          #스토캐스틱 기본값: k=14,d=3
+            'stoch_d' : 18,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
             'obv' : 1
         }
 
@@ -132,8 +133,7 @@ class IndicatorCalculator:
             days = lookback_map.get(indicator, 0)
             max_lookback = max(max_lookback, days)
 
-        # 안전마진 추가 (계산 오차 방지)
-        return max_lookback + 5
+        return max_lookback
 
     def calculate_indicators(
         self,
@@ -274,14 +274,3 @@ class IndicatorCalculator:
                 f"Invalid indicators: {invalid}\n"
                 f"Available: {available}"
             )
-    
-    @staticmethod
-    def add_indicators(
-        indicator: str,
-        calculation_func
-    ):
-        if indicator in IndicatorCalculator.INDICATORS_FUNCTIONS:
-            logger.warning(f"Indicator {indicator} already exists. Overwritting..")
-        
-        IndicatorCalculator.INDICATORS_FUNCTIONS[indicator] = calculation_func
-        logger.info(f"Added new indicator: {indicator}")

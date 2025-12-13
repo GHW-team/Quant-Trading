@@ -17,6 +17,7 @@ import logging
 from tests.fixtures import (
     # Sample data
     sample_df_basic,
+    sample_df_small,
     sample_df_with_indicators,
     sample_df_labeled,
     sample_training_data,

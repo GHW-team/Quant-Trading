@@ -24,6 +24,10 @@ class Labeler:
         if price_col not in df.columns:
             raise ValueError(f"Column '{price_col}' not found in DataFrame")
 
+        #날짜 존재하는지 검증
+        if 'date' not in df.columns:
+            raise ValueError(f"Column 'date' not found in DataFrame")
+
         df = df.copy()
         
         # 정렬 보장

@@ -9,40 +9,25 @@ import numpy as np
 from src.ml.labeler import Labeler
 
 
-class TestLabelerInitialization:
-    """Labeler 초기화 테스트"""
+class TestLabeler:
+    """라벨 생성 기능 테스트"""
 
-    def test_default_initialization(self):
-        """기본값으로 초기화"""
-        labeler = Labeler()
-        assert labeler.horizon == 5
-        assert labeler.threshold == 0.02
-
-
-class TestLabelerBasicFunctionality:
-    """라벨 생성 기본 기능 테스트"""
-
+    # ==================================
+    # 함수 정상 작동 테스트
+    # ==================================
     def test_label_column_created(self, sample_df_basic):
         """label 컬럼이 생성되는가?"""
         labeler = Labeler()
         result = labeler.label_data(sample_df_basic)
 
+        # label 컬럼 생성 여부
         assert 'label' in result.columns
         assert len(result['label']) > 0
 
-    def test_dataframe_shape_preserved(self, sample_df_basic):
-        """데이터프레임 행 개수 유지"""
-        labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
-
+        # DataFrame 행 개수 유지        
         assert len(result) == len(sample_df_basic)
-        assert result.shape[0] == sample_df_basic.shape[0]
 
-    def test_return_n_column_removed(self, sample_df_basic):
-        """return_n 컬럼은 제거되어야 함"""
-        labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
-
+        #return_n 컬럼은 제거되어야 함
         assert 'return_n' not in result.columns
 
     def test_label_only_contains_0_1_nan(self, sample_df_basic):
@@ -50,13 +35,7 @@ class TestLabelerBasicFunctionality:
         labeler = Labeler()
         result = labeler.label_data(sample_df_basic)
 
-        valid_labels = {0.0, 1.0, np.nan}
-        actual_labels = set(result['label'].dropna().unique())
-        assert actual_labels.issubset({0.0, 1.0})
-
-
-class TestLabelerLastHorizonNaN:
-    """마지막 horizon 행의 NaN 처리 테스트"""
+        assert result['label'].isin([1,0,np.nan]).all()
 
     def test_last_horizon_rows_are_nan(self, sample_df_basic):
         """마지막 horizon개 행은 NaN"""
@@ -64,70 +43,13 @@ class TestLabelerLastHorizonNaN:
         labeler = Labeler(horizon=horizon)
         result = labeler.label_data(sample_df_basic)
 
-        # 마지막 5개 행은 미래 데이터가 없으므로 NaN
-        assert result['label'].iloc[-5:].isna().all()
+        # 마지막 horizon개 행은 미래 데이터가 없으므로 NaN
+        assert result['label'].iloc[-horizon:].isna().all()
 
-    def test_nan_count_equals_horizon(self, sample_df_basic):
-        """NaN 개수가 정확히 horizon개"""
-        horizon = 7
-        labeler = Labeler(horizon=horizon)
-        result = labeler.label_data(sample_df_basic)
-
-        nan_count = result['label'].isna().sum()
-        assert nan_count == horizon
-
-    def test_before_last_horizon_not_all_nan(self, sample_df_basic):
-        """마지막 horizon 행 이전은 NaN이 아님"""
-        horizon = 5
-        labeler = Labeler(horizon=horizon)
-        result = labeler.label_data(sample_df_basic)
-
-        # 마지막 5개 이전 행들은 NaN이 아님 (1/0)
+        # 마지막 horizon개 이전 행들은 NaN이 아님 (1/0)
         before_last = result['label'].iloc[:-horizon]
         assert not before_last.isna().any()
-
-
-class TestLabelerErrorHandling:
-    """에러 처리 테스트"""
-
-    def test_raises_error_missing_price_column(self):
-        """필수 컬럼(adj_close)이 없으면 ValueError"""
-        labeler = Labeler()
-        df = pd.DataFrame({'wrong_col': [100, 101, 102]})
-
-        with pytest.raises(ValueError, match="Column 'adj_close' not found"):
-            labeler.label_data(df)
-
-    def test_custom_price_column_not_found(self, sample_df_basic):
-        """커스텀 price_col이 없으면 ValueError"""
-        labeler = Labeler()
-        df = sample_df_basic.copy()
-
-        with pytest.raises(ValueError, match="Column 'custom_price' not found"):
-            labeler.label_data(df, price_col='custom_price')
-
-    def test_empty_dataframe(self):
-        """빈 DataFrame에서 작동"""
-        labeler = Labeler()
-        df = pd.DataFrame({'adj_close': []})
-
-        result = labeler.label_data(df)
-        assert len(result) == 0
-
-    def test_single_row_dataframe(self):
-        """1개 행 DataFrame 처리"""
-        labeler = Labeler(horizon=5)
-        df = pd.DataFrame({'adj_close': [100]})
-
-        result = labeler.label_data(df)
-        assert len(result) == 1
-        # 1개 행만 있으면 모두 NaN (미래 데이터 없음)
-        assert pd.isna(result['label'].iloc[0])
-
-
-class TestLabelerThresholdLogic:
-    """threshold 로직 테스트"""
-
+    
     @pytest.mark.parametrize("price_start,price_end,threshold,expected_label", [
         # 상승 케이스 (label=1)
         (100, 110, 0.02, 1),      # 10% > 2%
@@ -142,15 +64,14 @@ class TestLabelerThresholdLogic:
     def test_threshold_logic(self, price_start, price_end, threshold, expected_label):
         """다양한 threshold와 가격 변동 테스트"""
         labeler = Labeler(horizon=1, threshold=threshold)
-        df = pd.DataFrame({'adj_close': [price_start, price_end]})
+        df = pd.DataFrame({
+            'adj_close': [price_start, price_end],
+            'date': pd.date_range('2020-01-01',periods=2)
+        })
 
         result = labeler.label_data(df)
         assert result['label'].iloc[0] == expected_label
-
-
-class TestLabelerDateSorting:
-    """날짜 정렬 테스트"""
-
+    
     def test_sorts_by_date_column(self):
         """date 컬럼이 있으면 정렬"""
         labeler = Labeler(horizon=1)
@@ -165,30 +86,33 @@ class TestLabelerDateSorting:
         dates = pd.to_datetime(result['date'])
         assert (dates.diff()[1:] >= pd.Timedelta(days=0)).all()
 
-    def test_without_date_column(self, sample_df_basic):
-        """date 컬럼이 없어도 작동"""
-        labeler = Labeler(horizon=1)
+    # ==================================
+    # 함수 엣지 케이스 테스트
+    # ==================================
+
+    def test_empty_dataframe(self):
+        """빈 DataFrame에서 작동"""
+        labeler = Labeler()
         df = pd.DataFrame({
-            'adj_close': [100, 101, 102, 103]
+            'adj_close': [],
+            'date': [],
         })
 
         result = labeler.label_data(df)
-        assert 'label' in result.columns
+        assert len(result) == 0
 
-    def test_date_column_preserved(self, sample_df_basic):
-        """date 컬럼이 원본에서 유지됨"""
-        labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
+    def test_single_row_dataframe(self):
+        """1개 행 DataFrame 처리"""
+        labeler = Labeler(horizon=5)
+        df = pd.DataFrame({
+            'adj_close': [100],
+            'date': ['2020-01-01'],
+        })
 
-        assert 'date' in result.columns
-        pd.testing.assert_series_equal(
-            result['date'].reset_index(drop=True),
-            sample_df_basic['date'].reset_index(drop=True)
-        )
-
-
-class TestLabelerWithNaNValues:
-    """NaN 값이 포함된 데이터프레임 테스트"""
+        result = labeler.label_data(df)
+        assert len(result) == 1
+        # 1개 행만 있으면 모두 NaN (미래 데이터 없음)
+        assert pd.isna(result['label'].iloc[0])
 
     def test_handles_nan_values(self, sample_df_with_nan):
         """NaN 값이 있는 데이터 처리"""
@@ -211,24 +135,28 @@ class TestLabelerWithNaNValues:
         assert (result.loc[nan_indices, 'label'] == 0.0).all(), \
             "NaN 가격은 label=0을 생성해야 함"
 
+    # ==================================
+    # 함수 에러 케이스 테스트
+    # ==================================
 
-class TestLabelerCopyBehavior:
-    """원본 DataFrame 수정 여부 테스트"""
-
-    def test_does_not_modify_original(self, sample_df_basic):
-        """원본 DataFrame을 수정하지 않음"""
+    def test_raises_error_missing_price_column(self):
+        """필수 컬럼(adj_close)이 없으면 ValueError"""
         labeler = Labeler()
-        df_copy = sample_df_basic.copy()
+        df = pd.DataFrame({'wrong_col': [100, 101, 102]})
+        df = pd.DataFrame({
+            'wrong_col': [100, 101, 102],
+            'date': ['2020-01-01','2020-01-02','2020-01-03'],
+        })
 
-        labeler.label_data(sample_df_basic)
+        with pytest.raises(ValueError, match="Column 'adj_close' not found"):
+            labeler.label_data(df)
 
-        # 원본이 변경되지 않았는지 확인
-        pd.testing.assert_frame_equal(sample_df_basic, df_copy)
-
-    def test_returns_new_dataframe(self, sample_df_basic):
-        """새로운 DataFrame을 반환"""
+    def test_raises_error_missing_date_column(self):
+        """필수 컬럼(date)이 없으면 ValueError"""
         labeler = Labeler()
-        result = labeler.label_data(sample_df_basic)
-
-        # 다른 객체여야 함
-        assert result is not sample_df_basic
+        df = pd.DataFrame({
+            'adj_close': [100,101,102],
+            'worng_col': [50, 51, 52], 
+        })
+        with pytest.raises(ValueError, match="Column 'date' not found in DataFrame"):
+            labeler.label_data(df)

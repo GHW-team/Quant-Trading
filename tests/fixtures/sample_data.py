@@ -12,6 +12,19 @@ import numpy as np
 def sample_df_basic():
     """기본 시계열 데이터프레임 (가격 데이터)"""
     return pd.DataFrame({
+        'date': pd.date_range('2020-01-01', periods=1000),
+        'open': np.arange(100, 1100),
+        'high': np.arange(101, 1101),
+        'low': np.arange(99, 1099),
+        'close': np.arange(100, 1100),
+        'adj_close': np.arange(100, 1100),
+        'volume': np.arange(1000000, 1000000 + 1000)
+    })
+
+@pytest.fixture
+def sample_df_small():
+    """기본 시계열 데이터프레임 (가격 데이터)"""
+    return pd.DataFrame({
         'date': pd.date_range('2020-01-01', periods=100),
         'open': np.arange(100, 200),
         'high': np.arange(101, 201),
@@ -20,7 +33,6 @@ def sample_df_basic():
         'adj_close': np.arange(100, 200),
         'volume': np.arange(1000000, 1000000 + 100)
     })
-
 
 @pytest.fixture
 def sample_df_with_indicators(sample_df_basic):

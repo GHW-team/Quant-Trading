@@ -5,6 +5,7 @@ Pytest fixtures 패키지
 
 from .sample_data import (
     sample_df_basic,
+    sample_df_small,
     sample_df_with_indicators,
     sample_df_labeled,
     sample_training_data,

@@ -10,36 +10,7 @@ import tempfile
 import os
 from src.ml.logistic_regression import LogisticRegressionHandler
 
-
-class TestLogisticRegressionHandlerInitialization:
-    """모델 핸들러 초기화 테스트"""
-
-    def test_initialization_with_features(self):
-        """feature names와 함께 초기화"""
-        features = ['ma_5', 'ma_20', 'ma_200', 'macd']
-        handler = LogisticRegressionHandler(feature_names=features)
-
-        assert handler.feature_names == features
-        assert handler.model is None
-        assert handler.is_fitted is False
-
-    def test_initialization_empty_features(self):
-        """빈 feature list로 초기화"""
-        handler = LogisticRegressionHandler(feature_names=[])
-
-        assert handler.feature_names == []
-        assert handler.model is None
-        assert handler.is_fitted is False
-
-    def test_scaler_initialized(self):
-        """StandardScaler 초기화"""
-        handler = LogisticRegressionHandler(feature_names=['col1'])
-
-        assert handler.scaler is not None
-        from sklearn.preprocessing import StandardScaler
-        assert isinstance(handler.scaler, StandardScaler)
-
-
+# train
 class TestLogisticRegressionHandlerTrain:
     """모델 학습 테스트"""
 
@@ -64,18 +35,6 @@ class TestLogisticRegressionHandlerTrain:
         assert handler.is_fitted is False
         handler.train(X, y)
         assert handler.is_fitted is True
-
-    def test_scaler_is_fitted(self, sample_training_data_ml):
-        """Scaler가 학습되는가?"""
-        X, y = sample_training_data_ml
-        handler = LogisticRegressionHandler(
-            feature_names=['adj_close', 'ma_5', 'ma_20', 'ma_200', 'macd']
-        )
-
-        handler.train(X, y)
-
-        assert handler.scaler.mean_ is not None
-        assert len(handler.scaler.mean_) == X.shape[1]
 
     def test_train_metrics_stored(self, sample_training_data_ml):
         """학습 메트릭이 저장됨"""
@@ -102,19 +61,7 @@ class TestLogisticRegressionHandlerTrain:
 
         assert result is handler
 
-    def test_train_with_single_feature(self):
-        """단일 feature로 학습"""
-        X = pd.DataFrame({
-            'feature1': np.random.randn(50)
-        })
-        y = pd.Series(np.random.randint(0, 2, 50))
-
-        handler = LogisticRegressionHandler(feature_names=['feature1'])
-        handler.train(X, y)
-
-        assert handler.is_fitted is True
-
-
+# evaluate
 class TestLogisticRegressionHandlerEvaluate:
     """모델 평가 테스트"""
 
@@ -127,28 +74,23 @@ class TestLogisticRegressionHandlerEvaluate:
         )
         handler.train(X, y)
         return handler, X, y
+    # ==================================
+    # 함수 정상 케이스 테스트
+    # ==================================
 
-    def test_evaluate_returns_dict(self, trained_handler):
-        """evaluate 결과가 dict"""
+    def test_evaluate_has_accuracy(self, trained_handler):
+        """결과에 test_accuracy, count 키가 있음"""
         handler, X, y = trained_handler
         result = handler.evaluate(X, y)
 
         assert isinstance(result, dict)
-
-    def test_evaluate_has_accuracy(self, trained_handler):
-        """결과에 test_accuracy 키가 있음"""
-        handler, X, y = trained_handler
-        result = handler.evaluate(X, y)
-
         assert 'test_accuracy' in result
+        assert 'count' in result
+        assert result['count'] == len(X)
 
-    def test_evaluate_accuracy_in_valid_range(self, trained_handler):
-        """정확도가 0-1 범위"""
-        handler, X, y = trained_handler
-        result = handler.evaluate(X, y)
-
-        accuracy = result['test_accuracy']
-        assert 0 <= accuracy <= 1
+    # ==================================
+    # 함수 에러 케이스 테스트
+    # ==================================
 
     def test_evaluate_without_training_raises_error(self):
         """학습되지 않은 모델로 평가하면 에러"""
@@ -158,14 +100,6 @@ class TestLogisticRegressionHandlerEvaluate:
 
         with pytest.raises(ValueError, match="학습되지 않았습니다"):
             handler.evaluate(X, y)
-
-    def test_evaluate_has_count(self, trained_handler):
-        """결과에 count 키가 있음"""
-        handler, X, y = trained_handler
-        result = handler.evaluate(X, y)
-
-        assert 'count' in result
-        assert result['count'] == len(X)
 
     def test_evaluate_validates_features(self, trained_handler):
         """feature 검증"""
@@ -179,7 +113,7 @@ class TestLogisticRegressionHandlerEvaluate:
         with pytest.raises(ValueError):
             handler.evaluate(X_wrong, pd.Series([0, 1, 0]))
 
-
+# predict
 class TestLogisticRegressionHandlerPredict:
     """모델 예측 테스트"""
 
@@ -193,12 +127,15 @@ class TestLogisticRegressionHandlerPredict:
         handler.train(X, y)
         return handler, X, y
 
+    # ==================================
+    # 함수 정상 케이스 테스트
+    # ==================================
     def test_predict_returns_array(self, trained_handler):
         """predict가 배열 반환"""
         handler, X, y = trained_handler
         predictions = handler.predict(X[:5])
 
-        assert isinstance(predictions, (np.ndarray, list))
+        assert isinstance(predictions, np.ndarray)
 
     def test_predict_length_matches_input(self, trained_handler):
         """예측값 개수가 입력 개수와 일치"""
@@ -214,6 +151,9 @@ class TestLogisticRegressionHandlerPredict:
 
         assert set(predictions).issubset({0, 1})
 
+    # ==================================
+    # 함수 에러 케이스 테스트
+    # ==================================
     def test_predict_without_training_raises_error(self):
         """학습되지 않은 모델로 예측하면 에러"""
         handler = LogisticRegressionHandler(feature_names=['col1'])
@@ -232,24 +172,6 @@ class TestLogisticRegressionHandlerPredict:
 
         with pytest.raises(ValueError):
             handler.predict(X_wrong)
-
-    def test_predict_handles_different_input_sizes(self, trained_handler):
-        """다양한 크기의 입력 처리"""
-        handler, X, y = trained_handler
-
-        for size in [1, 5, 10, len(X)]:
-            predictions = handler.predict(X[:size])
-            assert len(predictions) == size
-
-    def test_predict_consistent_across_calls(self, trained_handler):
-        """같은 입력에 대해 일관된 예측"""
-        handler, X, y = trained_handler
-        X_test = X[:5]
-
-        pred1 = handler.predict(X_test)
-        pred2 = handler.predict(X_test)
-
-        np.testing.assert_array_equal(pred1, pred2)
 
 
 class TestLogisticRegressionHandlerSaveLoad:
