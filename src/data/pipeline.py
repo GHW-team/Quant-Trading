@@ -58,6 +58,9 @@ class DataPipeline:
         amount = int(period[:-1])
         unit = period[-1].lower()
 
+        if amount < 0:
+            raise ValueError(f"Period cannot be negativd : {amount}")
+
         if unit == 'y':
             start_dt = today.replace(year=today.year - amount)
         elif unit == 'm':
@@ -81,7 +84,7 @@ class DataPipeline:
         logger.debug(f"Converted period '{period}' to start_date={start_date}, end_date={end_date}")
         return start_date, end_date
 
-    def _calculate_extended_start_date(self, start_date: Optional[str], indicator_list: List[str]) -> Optional[str]:
+    def _calculate_extended_start_date(self, start_date: str, indicator_list: List[str]) -> Optional[str]:
         """
         지표 계산을 위해 '안전 마진'이 포함된 과거 시작 날짜를 계산합니다.
 
@@ -94,8 +97,6 @@ class DataPipeline:
         Returns:
             확장된 시작 날짜 (YYYY-MM-DD 형식), start_date가 None이면 None
         """
-        if not start_date:
-            return None
 
         # 필요한 룩백 일수 조회 (예: ma_200 -> 200일)
         lookback_days = IndicatorCalculator.get_lookback_days(indicator_list)

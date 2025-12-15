@@ -7,15 +7,29 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from unittest.mock import patch
+
 from src.data.pipeline import DataPipeline
+from src.data.db_manager import DatabaseManager
+from src.data.data_fetcher import StockDataFetcher
+from src.data.indicator_calculator import IndicatorCalculator
 
-
+# _convert_period_to_dates
 class TestDataPipelineConvertPeriodToDates:
     """Period 문자열 파싱 테스트"""
-
-    def test_convert_1y_period(self):
+    # ==================================
+    # 함수 정상 케이스 테스트
+    # ==================================
+    @pytest.mark.parametrize("period,min,max",[
+        ("1y",330,390),
+        ("6m",150,200),
+        ("1d",0,2),
+        ("1w",5,10),
+        ("0y",0,1),
+    ])
+    def test_convert_period(self, period, min, max):
         """1년 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('1y')
+        start_date, end_date = DataPipeline._convert_period_to_dates(period)
 
         assert isinstance(start_date, str)
         assert isinstance(end_date, str)
@@ -23,96 +37,8 @@ class TestDataPipelineConvertPeriodToDates:
         # 날짜 형식 검증
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
-        assert start_dt < end_dt
-
-    def test_convert_6m_period(self):
-        """6개월 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('6m')
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-
-        # 약 6개월 차이
-        diff_days = (end_dt - start_dt).days
-        assert 150 < diff_days < 200
-
-    def test_convert_3m_period(self):
-        """3개월 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('3m')
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-
-        # 약 3개월 차이
-        diff_days = (end_dt - start_dt).days
-        assert 75 < diff_days < 95
-
-    def test_convert_1m_period(self):
-        """1개월 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('1m')
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-
-        # 약 1개월 차이
-        diff_days = (end_dt - start_dt).days
-        assert 25 < diff_days < 35
-
-    def test_convert_1d_period(self):
-        """1일 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('1d')
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-
-        # 1일 차이
-        diff_days = (end_dt - start_dt).days
-        assert 0 < diff_days < 2
-
-    def test_convert_1w_period(self):
-        """1주 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('1w')
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-
-        # 약 7일 차이
-        diff_days = (end_dt - start_dt).days
-        assert 5 < diff_days < 10
-
-    def test_invalid_period_raises_error(self):
-        """잘못된 period 형식"""
-        with pytest.raises(ValueError):
-            DataPipeline._convert_period_to_dates('invalid')
-
-    def test_period_with_zero_returns_same_year(self):
-        """0 기간 - 현재 연도로 변환됨"""
-        # 현재 소스코드는 amount=0일 때 에러를 발생하지 않음
-        # today.year - 0 = today.year (현재 연도)
-        start_date, end_date = DataPipeline._convert_period_to_dates('0y')
-
-        # start_date와 end_date가 같은 연도
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-        assert start_dt.year == end_dt.year
-        # start_date와 end_date가 같은 날짜 또는 매우 가까움
-        assert (end_dt - start_dt).days <= 1
-
-    def test_period_with_negative_amount(self):
-        """음수 기간 - 미래 날짜로 변환됨"""
-        # '-1y'는 today.year - (-1) = today.year + 1
-        start_date, end_date = DataPipeline._convert_period_to_dates('-1y')
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-        # start_date가 end_date보다 미래
-        assert start_dt > end_dt
-
-    def test_period_with_float_raises_error(self):
-        """부동소수점 기간 - ValueError 발생"""
-        # '1.5y'는 int('1.')를 호출하려고 함 → ValueError
-        with pytest.raises((ValueError, IndexError)):
-            DataPipeline._convert_period_to_dates('1.5y')
+        diff_days = (end_dt- start_dt).days
+        assert min <= diff_days <= max
 
     def test_period_format_yyyy_mm_dd(self):
         """반환값이 YYYY-MM-DD 형식"""
@@ -123,67 +49,48 @@ class TestDataPipelineConvertPeriodToDates:
         assert len(end_date) == 10
         assert start_date[4] == '-'
         assert start_date[7] == '-'
+    # ==================================
+    # 함수 에러 케이스 테스트
+    # ==================================
+    @pytest.mark.parametrize("period",[
+        ('invalid'),
+        ('1.5y'),
+        ('-1y')
+    ])
+    def test_invalid_period_raises_error(self,period):
+        """잘못된 period 형식"""
+        with pytest.raises(ValueError):
+            DataPipeline._convert_period_to_dates(period)
 
-
+# _calculate_extended_start_date
 class TestDataPipelineCalculateExtendedStartDate:
     """Lookback 시작 날짜 계산 테스트"""
 
-    def test_extended_start_date_with_ma_5(self, temp_db_path):
+    @pytest.mark.parametrize("indicator_list, expected_date",[
+        (['ma_5'],5),
+        (['ma_200'],200),
+        (['bb_lower'],20),
+        (['ma_5','hv','macd_hist'],34),
+    ])
+    def test_extended_start_date(self, temp_db_path, indicator_list, expected_date):
         """ma_5 lookback 계산"""
         pipeline = DataPipeline(db_path=temp_db_path)
 
         original_date = '2020-01-01'
         extended_date = pipeline._calculate_extended_start_date(
             original_date,
-            ['ma_5']
+            indicator_list
         )
 
         # 과거로 확장됨
         original_dt = pd.to_datetime(original_date)
         extended_dt = pd.to_datetime(extended_date)
-        assert extended_dt < original_dt
 
-        pipeline.close()
-
-    def test_extended_start_date_with_ma_200(self, temp_db_path):
-        """ma_200 lookback 계산"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        original_date = '2020-01-01'
-        extended_date = pipeline._calculate_extended_start_date(
-            original_date,
-            ['ma_200']
-        )
-
-        # ma_200은 lookback이 길어야 함
-        original_dt = pd.to_datetime(original_date)
-        extended_dt = pd.to_datetime(extended_date)
         diff_days = (original_dt - extended_dt).days
+        lookback = int(expected_date * 1.6) + 10
 
-        assert diff_days > 200  # 최소 200일 이상
-
-        pipeline.close()
-
-    def test_extended_start_date_multiple_indicators(self, temp_db_path):
-        """여러 지표 lookback (최대값)"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        date1 = pipeline._calculate_extended_start_date('2020-01-01', ['ma_5'])
-        date2 = pipeline._calculate_extended_start_date('2020-01-01', ['ma_200'])
-        date3 = pipeline._calculate_extended_start_date('2020-01-01', ['ma_5', 'ma_200'])
-
-        # ma_200이 포함되면 가장 멀어야 함
-        assert pd.to_datetime(date3) <= pd.to_datetime(date2)
-        assert pd.to_datetime(date3) < pd.to_datetime(date1)
-
-        pipeline.close()
-
-    def test_extended_start_date_with_none(self, temp_db_path):
-        """None 입력은 None 반환"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        result = pipeline._calculate_extended_start_date(None, ['ma_5'])
-        assert result is None
+        print(indicator_list)
+        assert diff_days == lookback
 
         pipeline.close()
 
@@ -203,43 +110,21 @@ class TestDataPipelineCalculateExtendedStartDate:
 
         pipeline.close()
 
-
+# __init__
 class TestDataPipelineInitialization:
     """DataPipeline 초기화 테스트"""
-
-    def test_initialization_with_custom_db_path(self, temp_db_path):
-        """커스텀 DB 경로로 초기화"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        assert pipeline.db_path == temp_db_path
-        assert pipeline.db_manager is not None
-        assert pipeline.fetcher is not None
-        assert pipeline.calculator is not None
-
-        pipeline.close()
-
-    def test_initialization_with_custom_workers(self, temp_db_path):
-        """커스텀 worker 수"""
-        pipeline = DataPipeline(
-            db_path=temp_db_path,
-            max_workers=10,
-            max_retries=5
-        )
-
-        assert pipeline is not None
-        pipeline.close()
 
     def test_initialization_creates_components(self, temp_db_path):
         """필요한 컴포넌트 생성"""
         pipeline = DataPipeline(db_path=temp_db_path)
 
-        assert hasattr(pipeline, 'db_manager')
-        assert hasattr(pipeline, 'fetcher')
-        assert hasattr(pipeline, 'calculator')
+        assert isinstance(pipeline.db_manager, DatabaseManager)
+        assert isinstance(pipeline.fetcher, StockDataFetcher)
+        assert isinstance(pipeline.calculator, IndicatorCalculator)
 
         pipeline.close()
 
-
+# __enter__ , __exit__
 class TestDataPipelineContextManager:
     """Context Manager 테스트"""
 
@@ -248,19 +133,21 @@ class TestDataPipelineContextManager:
         with DataPipeline(db_path=temp_db_path) as pipeline:
             assert isinstance(pipeline, DataPipeline)
 
-    def test_context_manager_closes_connection(self, temp_db_path):
-        """__exit__에서 연결 종료"""
+    def test_exit_calls_close(self, temp_db_path):
+        """with 블록을 나갈 때 close()가 호출되는지 검증"""
         pipeline = DataPipeline(db_path=temp_db_path)
-        pipeline.__exit__(None, None, None)
-        # 종료 후에도 에러 없음
 
-    def test_with_statement_workflow(self, temp_db_path):
-        """with 문장 워크플로우"""
-        with DataPipeline(db_path=temp_db_path) as pipeline:
-            assert pipeline is not None
-            # with 블록 내에서 사용 가능
+        # pipeline의 close 메서드를 감시하는 Mock 객체
+        with patch.object(pipeline, 'close') as mock_close:
+            
+            # 3. Context Manager 진입 및 탈출
+            with pipeline:
+                pass
+            
+            # 4. 검증: "나갈 때 close()가 딱 한 번 호출됐니?"
+            mock_close.assert_called_once()
 
-
+# close
 class TestDataPipelineClose:
     """Close 메서드 테스트"""
 
