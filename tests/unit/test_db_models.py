@@ -322,7 +322,7 @@ class TestTechnicalIndicatorModel:
             ma_20=50100,
             ma_200=50200,
             macd=100,
-            caculated_version='v2.0'
+            calculated_version='v2.0'
         )
         session.add(indicator)
         session.commit()
@@ -333,7 +333,7 @@ class TestTechnicalIndicatorModel:
         assert result.ma_20 == 50100
         assert result.ma_200 == 50200
         assert result.macd == 100
-        assert result.caculated_version == 'v2.0'
+        assert result.calculated_version == 'v2.0'
     
     def test_technical_indicator_calculated_at_default(self, temp_db, sample_ticker):
         """calculated_at 자동 설정"""

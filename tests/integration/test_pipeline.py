@@ -7,7 +7,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from src.data.pipeline import DataPipeline
 from src.data.db_manager import DatabaseManager
@@ -320,3 +320,85 @@ class TestDataPipelineStaticMethodsEdgeCases:
         assert result is not None
 
         pipeline.close()
+
+
+class TestDataPipelineFullWorkflow:
+    """run_full_pipeline 전체 워크플로우 테스트 (핵심만)"""
+
+    def test_run_full_pipeline_by_period(self, temp_db_path):
+        """Period 기반 전체 파이프라인 기본 실행"""
+        with patch('src.data.pipeline.StockDataFetcher') as mock_fetcher_class:
+            with patch('src.data.pipeline.IndicatorCalculator') as mock_calc_class:
+                # Mock 설정
+                mock_fetcher = MagicMock()
+                mock_fetcher_class.return_value = mock_fetcher
+                mock_fetcher.fetch_multiple_by_period.return_value = {
+                    '005930.KS': pd.DataFrame({
+                        'date': pd.date_range('2020-01-01', periods=100),
+                        'open': np.random.randn(100) + 100,
+                        'high': np.random.randn(100) + 101,
+                        'low': np.random.randn(100) + 99,
+                        'close': np.random.randn(100) + 100,
+                        'adj_close': np.random.randn(100) + 100,
+                        'volume': np.random.randint(1000000, 2000000, 100),
+                    })
+                }
+
+                mock_calc = MagicMock()
+                mock_calc_class.return_value = mock_calc
+                mock_calc.calculate_indicators.side_effect = lambda df, ind_list: (
+                    df.assign(**{ind: np.random.randn(len(df)) for ind in (ind_list or [])})
+                )
+
+                pipeline = DataPipeline(db_path=temp_db_path)
+                result = pipeline.run_full_pipeline(
+                    ticker_list=['005930.KS'],
+                    period='1y',
+                    indicator_list=['ma_5', 'ma_20']
+                )
+
+                assert result is not None
+                pipeline.close()
+
+    def test_run_full_pipeline_multiple_tickers(self, temp_db_path):
+        """여러 ticker 동시 처리 (병렬 처리 검증)"""
+        with patch('src.data.pipeline.StockDataFetcher') as mock_fetcher_class:
+            with patch('src.data.pipeline.IndicatorCalculator') as mock_calc_class:
+                mock_fetcher = MagicMock()
+                mock_fetcher_class.return_value = mock_fetcher
+                mock_fetcher.fetch_multiple_by_period.return_value = {
+                    '005930.KS': pd.DataFrame({
+                        'date': pd.date_range('2020-01-01', periods=100),
+                        'open': np.arange(100, 200),
+                        'high': np.arange(101, 201),
+                        'low': np.arange(99, 199),
+                        'close': np.arange(100, 200),
+                        'adj_close': np.arange(100, 200),
+                        'volume': np.arange(1000000, 1000000 + 100),
+                    }),
+                    '000660.KS': pd.DataFrame({
+                        'date': pd.date_range('2020-01-01', periods=100),
+                        'open': np.arange(50, 150),
+                        'high': np.arange(51, 151),
+                        'low': np.arange(49, 149),
+                        'close': np.arange(50, 150),
+                        'adj_close': np.arange(50, 150),
+                        'volume': np.arange(1000000, 1000000 + 100),
+                    })
+                }
+
+                mock_calc = MagicMock()
+                mock_calc_class.return_value = mock_calc
+                mock_calc.calculate_indicators.side_effect = lambda df, ind_list: (
+                    df.assign(**{ind: np.random.randn(len(df)) for ind in (ind_list or [])})
+                )
+
+                pipeline = DataPipeline(db_path=temp_db_path)
+                result = pipeline.run_full_pipeline(
+                    ticker_list=['005930.KS', '000660.KS'],
+                    period='1y',
+                    indicator_list=['ma_5', 'ma_20']
+                )
+
+                assert result is not None
+                pipeline.close()

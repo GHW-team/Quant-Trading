@@ -5,9 +5,9 @@ pytest 설정 파일
 Fixtures는 tests/fixtures/ 폴더에 분리되어 있습니다:
   - fixtures/sample_data.py - 샘플 데이터 (DataFrame 등)
   - fixtures/database.py - DB 관련 (임시 경로 등)
-  - fixtures/mocks.py - Mock 객체 (yfinance, DatabaseManager 등)
-  - fixtures/config.py - 설정 (config 딕셔너리 등)
-  - fixtures/utils.py - 유틸리티 (DataFrame/Series 비교 등)
+  - fixtures/mocks.py - Mock 객체 (yfinance)
+  - fixtures/config.py - 설정 (config 딕셔너리)
+  - fixtures/managers.py - 자동 정리 Context Manager
 """
 
 import pytest
@@ -22,26 +22,16 @@ from tests.fixtures import (
     sample_df_labeled,
     sample_training_data,
     sample_training_data_ml,
-    sample_df_empty,
-    sample_df_single_row,
     sample_df_with_nan,
     # Database
     temp_db_path,
     temp_model_dir,
     # Mocks
     mock_yfinance,
-    mock_database_manager,
-    mock_data_fetcher,
-    mock_indicator_calculator,
     # Config
     sample_config,
-    # Utils
-    assert_df_equal,
-    assert_series_equal,
     # Context Managers (자동으로 close 호출)
     db_manager,
-    pipeline_context,
-    db_manager_with_data,
 )
 
 # 로깅 설정

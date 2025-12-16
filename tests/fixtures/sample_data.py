@@ -102,24 +102,6 @@ def sample_training_data(sample_df_labeled):
 
 
 @pytest.fixture
-def sample_df_empty():
-    """빈 데이터프레임"""
-    return pd.DataFrame({
-        'date': [],
-        'adj_close': [],
-    })
-
-
-@pytest.fixture
-def sample_df_single_row():
-    """1개 행만 있는 데이터프레임"""
-    return pd.DataFrame({
-        'date': [pd.Timestamp('2020-01-01')],
-        'adj_close': [100],
-    })
-
-
-@pytest.fixture
 def sample_df_with_nan():
     """NaN 값이 포함된 데이터프레임"""
     return pd.DataFrame({

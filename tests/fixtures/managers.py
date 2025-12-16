@@ -21,33 +21,3 @@ def db_manager(temp_db_path):
     manager = DatabaseManager(db_path=temp_db_path)
     yield manager
     manager.close()
-
-
-@pytest.fixture
-def pipeline_context(temp_db_path):
-    """
-    자동으로 close()되는 DataPipeline
-
-    사용 예:
-        def test_pipeline(pipeline_context):
-            result = pipeline_context.run_full_pipeline(...)
-            # 자동으로 close() 호출됨
-    """
-    pipeline = DataPipeline(db_path=temp_db_path)
-    yield pipeline
-    pipeline.close()
-
-
-@pytest.fixture
-def db_manager_with_data(temp_db_path, sample_df_basic):
-    """
-    초기 데이터가 있는 DatabaseManager
-
-    사용 예:
-        def test_query(db_manager_with_data):
-            prices = db_manager_with_data.load_price_data('005930.KS')
-    """
-    manager = DatabaseManager(db_path=temp_db_path)
-    manager.save_price_data({'005930.KS': sample_df_basic})
-    yield manager
-    manager.close()
