@@ -1,12 +1,12 @@
 #Ticker / DailyPrice / TechnicalIndicator!
 
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (Column,Integer,String,
                         Date,Float,DateTime,ForeignKey,
                         UniqueConstraint, Index, create_engine)
 from sqlalchemy.orm import relationship 
 from datetime import datetime, timezone  
 from pathlib import Path
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -89,7 +89,6 @@ class TechnicalIndicator(Base):
         UniqueConstraint('ticker_id','date', name= 'uix_ticker_date_ind'),
         Index('idx_ticker_date_ind', 'ticker_id','date'),
     )
-
 
 def create_tables(db_path: str = 'data/database/stocks.db'):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)

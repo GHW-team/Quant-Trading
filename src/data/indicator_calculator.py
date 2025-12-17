@@ -102,6 +102,7 @@ class IndicatorCalculator:
             indicator_list = list(IndicatorCalculator.INDICATORS_FUNCTIONS.keys())
 
         # 지표별 필요한 과거 기간
+        # 엄밀한 정의 : pandas-ta-classic 라이브러리가 유효 값 1개를 얻기 위한 최소 데이터 수
         lookback_map = {
             'ma_5': 5,
             'ma_10': 10,
@@ -112,17 +113,17 @@ class IndicatorCalculator:
             'ma_120': 120,
             'ma_200': 200,
             'macd': 26,              # slow period
-            'macd_signal': 26,
-            'macd_hist': 26,
-            'rsi': 14,               # RSI 기본값 (향후 추가 가능)
+            'macd_signal': 34,
+            'macd_hist': 34,
+            'rsi': 15,               # RSI 기본값 (향후 추가 가능)
             'bb_upper': 20,          #볼린저밴드 기본값
             'bb_mid': 20,
             'bb_lower': 20,
             'bb_pct': 20,
-            'atr' : 14,              #ATR 기본값
-            'hv' : 20,               #HV 기본값 
-            'stoch_k' : 14,          #스토캐스틱 기본값: k=14,d=3
-            'stoch_d' : 14,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
+            'atr' : 15,              #ATR 기본값
+            'hv' : 21,               #HV 기본값 
+            'stoch_k' : 16,          #스토캐스틱 기본값: k=14,d=3
+            'stoch_d' : 18,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
             'obv' : 1
         }
 
@@ -132,8 +133,7 @@ class IndicatorCalculator:
             days = lookback_map.get(indicator, 0)
             max_lookback = max(max_lookback, days)
 
-        # 안전마진 추가 (계산 오차 방지)
-        return max_lookback + 5
+        return max_lookback
 
     def calculate_indicators(
         self,
@@ -152,6 +152,25 @@ class IndicatorCalculator:
             available_cols = list(df.columns)
             logger.error(f"Required column 'adj_close' not found. Available columns: {available_cols}")
             raise ValueError(f"Cannot calculate indicators: required column 'adj_close' not found. Available: {available_cols}")
+
+        # Check for 'date' column and validate ordering
+        if 'date' in df.columns:
+            if not pd.api.types.is_datetime64_any_dtype(df['date']):
+                logger.error(f"'date' column exists but is not datetime type: {df['date'].dtype}")
+                raise ValueError(
+                    f"Cannot calculate indicators: 'date' column must be datetime type, "
+                    f"got {df['date'].dtype}"
+                )
+
+            if not df['date'].is_monotonic_increasing:
+                logger.error("'date' column is not sorted in chronological order")
+                raise ValueError(
+                    "Cannot calculate indicators: 'date' column must be sorted in "
+                    "chronological (ascending) order for accurate time-series calculations. "
+                    "Please sort DataFrame by date before calling calculate_indicators()."
+                )
+
+            logger.debug(f"Date column validated: {len(df)} rows from {df['date'].min()} to {df['date'].max()}")
 
         # Default setting: All indicators
         if indicator_list == None:
@@ -255,189 +274,3 @@ class IndicatorCalculator:
                 f"Invalid indicators: {invalid}\n"
                 f"Available: {available}"
             )
-    
-    @staticmethod
-    def add_indicators(
-        indicator: str,
-        calculation_func
-    ):
-        if indicator in IndicatorCalculator.INDICATORS_FUNCTIONS:
-            logger.warning(f"Indicator {indicator} already exists. Overwritting..")
-        
-        IndicatorCalculator.INDICATORS_FUNCTIONS[indicator] = calculation_func
-        logger.info(f"Added new indicator: {indicator}")
-
-if __name__ == "__main__":
-    print("\n" + "="*70)
-    print("IndicatorCalculator 테스트")
-    print("="*70)
-
-    # [1] IndicatorCalculator 초기화
-    print("\n[1] IndicatorCalculator 초기화...")
-    try:
-        calculator = IndicatorCalculator()
-        print(f"✓ IndicatorCalculator 생성 완료")
-    except Exception as e:
-        print(f"✗ 초기화 실패: {e}")
-        exit(1)
-
-    # [2] get_available_indicators() 테스트
-    print("\n[2] get_available_indicators() 테스트...")
-    try:
-        available = IndicatorCalculator.get_available_indicators()
-        print(f"✓ 사용 가능한 지표: {available}")
-        print(f"  - 총 {len(available)}개")
-    except Exception as e:
-        print(f"✗ 지표 조회 실패: {e}")
-
-    # [3] validate_indicators() 테스트 - 정상 케이스
-    print("\n[3] validate_indicators() 테스트 (정상)...")
-    try:
-        valid_indicators = ['ma_5', 'ma_20', 'ma_200', 'macd']
-        IndicatorCalculator.validate_indicators(valid_indicators)
-        print(f"✓ 유효한 지표 검증 통과: {valid_indicators}")
-    except Exception as e:
-        print(f"✗ 유효한 지표 검증 실패: {e}")
-
-    # [4] validate_indicators() 테스트 - 에러 케이스
-    print("\n[4] validate_indicators() 테스트 (에러)...")
-    try:
-        invalid_indicators = ['ma_5', 'invalid_ma', 'macd']
-        IndicatorCalculator.validate_indicators(invalid_indicators)
-        print(f"✗ 무효한 지표를 통과시킴 (오류)")
-    except ValueError as e:
-        print(f"✓ 무효한 지표 감지 정상: {str(e)[:50]}...")
-
-    # [5] get_lookback_days() 테스트
-    print("\n[5] get_lookback_days() 테스트...")
-    try:
-        test_cases = [
-            ['ma_5'],
-            ['ma_200'],
-            ['ma_5', 'ma_20'],
-            ['ma_5', 'ma_20', 'ma_200', 'macd'],
-            None,  # 모든 지표
-        ]
-        for indicators in test_cases:
-            lookback = IndicatorCalculator.get_lookback_days(indicators)
-            print(f"✓ {indicators}: {lookback} 일")
-    except Exception as e:
-        print(f"✗ lookback 계산 실패: {e}")
-
-    # [6] 테스트 데이터 준비 (fetch)
-    print("\n[6] 테스트 데이터 준비...")
-    try:
-        fetcher = StockDataFetcher()
-        ticker = '005930.KS'
-        df_dict = fetcher.fetch_multiple_by_period(
-            ticker_list=[ticker],
-            period="1y"
-        )
-
-        if not df_dict:
-            print(f"✗ 데이터 수집 실패")
-            exit(1)
-
-        stock_df = df_dict[ticker]
-        # 컬럼명 정규화
-        stock_df.columns = (stock_df.columns
-                            .str.strip()
-                            .str.lower()
-                            .str.replace(' ', '_'))
-
-        print(f"✓ 데이터 준비 완료: {ticker}")
-        print(f"  - 행 수: {len(stock_df)}")
-        print(f"  - 컬럼: {list(stock_df.columns)}")
-    except Exception as e:
-        print(f"✗ 데이터 준비 실패: {e}")
-        exit(1)
-
-    # [7] calculate_indicators() 테스트 - 정상 케이스
-    print("\n[7] calculate_indicators() 테스트 (정상)...")
-    try:
-        indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
-        calculated_df = calculator.calculate_indicators(
-            stock_df.copy(),
-            indicator_list=indicator_list
-        )
-        print(f"✓ 지표 계산 완료: {indicator_list}")
-        print(f"  - 원본 행 수: {len(stock_df)}")
-        print(f"  - 계산 후 행 수: {len(calculated_df)}")
-        print(f"  - 계산된 지표 컬럼: {[col for col in calculated_df.columns if col in indicator_list]}")
-        print(f"  - NaN 값 비율:")
-        for ind in indicator_list:
-            nan_ratio = calculated_df[ind].isna().sum() / len(calculated_df) * 100
-            print(f"    - {ind}: {nan_ratio:.1f}%")
-    except Exception as e:
-        print(f"✗ 지표 계산 실패: {e}")
-
-    # [8] calculate_indicators() 테스트 - 부분 지표
-    print("\n[8] calculate_indicators() 테스트 (부분 지표)...")
-    try:
-        partial_indicators = ['ma_5', 'macd']
-        calculated_df2 = calculator.calculate_indicators(
-            stock_df.copy(),
-            indicator_list=partial_indicators
-        )
-        print(f"✓ 부분 지표 계산 완료: {partial_indicators}")
-        print(f"  - 계산된 지표: {[col for col in calculated_df2.columns if col in partial_indicators]}")
-    except Exception as e:
-        print(f"✗ 부분 지표 계산 실패: {e}")
-
-    # [9] calculate_indicators() 테스트 - 기본값 (모든 지표)
-    print("\n[9] calculate_indicators() 테스트 (기본값 - 모든 지표)...")
-    try:
-        calculated_df3 = calculator.calculate_indicators(stock_df.copy(), indicator_list=None)
-        calculated_cols = [col for col in calculated_df3.columns if col in available]
-        print(f"✓ 모든 지표 계산 완료")
-        print(f"  - 계산된 지표: {calculated_cols}")
-    except Exception as e:
-        print(f"✗ 모든 지표 계산 실패: {e}")
-
-    # [10] add_indicators() 테스트
-    print("\n[10] add_indicators() 테스트 (커스텀 지표)...")
-    try:
-        # 커스텀 지표 함수 정의
-        def custom_ma_10(df):
-            return ta.sma(df['adj_close'], length=10)
-
-        IndicatorCalculator.add_indicators('custom_ma_10', custom_ma_10)
-        print(f"✓ 커스텀 지표 추가 완료: custom_ma_10")
-
-        # 추가된 지표로 계산
-        calculated_df4 = calculator.calculate_indicators(
-            stock_df.copy(),
-            indicator_list=['custom_ma_10', 'ma_5']
-        )
-        print(f"✓ 커스텀 지표 계산 완료")
-        print(f"  - 포함된 지표: {[col for col in calculated_df4.columns if col in ['custom_ma_10', 'ma_5']]}")
-    except Exception as e:
-        print(f"✗ 커스텀 지표 추가 실패: {e}")
-
-    # [11] 에러 처리 - 빈 DataFrame
-    print("\n[11] 에러 처리 테스트 (빈 DataFrame)...")
-    try:
-        empty_df = pd.DataFrame()
-        calculated_df5 = calculator.calculate_indicators(
-            empty_df,
-            indicator_list=['ma_5']
-        )
-        print(f"✗ 빈 DataFrame을 통과시킴 (오류)")
-    except ValueError as e:
-        print(f"✓ 빈 DataFrame 감지 정상: {str(e)}")
-
-    # [12] 에러 처리 - 필수 컬럼 누락
-    print("\n[12] 에러 처리 테스트 (필수 컬럼 누락)...")
-    try:
-        bad_df = pd.DataFrame({'open': [1, 2, 3]})  # adj_close 없음
-        calculated_df6 = calculator.calculate_indicators(
-            bad_df,
-            indicator_list=['ma_5']
-        )
-        print(f"⚠ 필수 컬럼 없이도 계산됨 (또는 에러)")
-    except Exception as e:
-        print(f"✓ 필수 컬럼 누락 감지: {str(e)[:50]}...")
-
-    print("\n" + "="*70)
-    print("모든 테스트 완료!")
-    print("="*70)

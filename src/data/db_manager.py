@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """데이터베이스 관리 클래스"""
+    INDICATORS = [
+        'ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200',
+        'macd', 'macd_hist', 'macd_signal',
+        'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct',
+        'atr', 'hv', 'stoch_k', 'stoch_d', 'obv'
+    ]
 
     def __init__(self, db_path: str = "data/database/stocks.db"):
         self.db_path = db_path
@@ -167,6 +173,7 @@ class DatabaseManager:
                 except Exception as e:
                     logger.error(f"✗ Failed to save price data for {ticker_code}: {e}")
                     results[ticker_code] = 0
+                    continue
 
         logger.info(f"Bulk price save completed for {len(results)} tickers in single transaction")
         return results
@@ -181,8 +188,7 @@ class DatabaseManager:
         - 지표 컬럼만 선택, NaN을 None으로 치환 후 UPSERT
         """
         results = {}
-        indicators = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_hist', 'macd_signal',
-                      'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct', 'atr', 'hv', 'stoch_k', 'stoch_d', 'obv']
+        indicators = self.INDICATORS
 
         ticker_ids = {}
         for ticker_code in indicator_data_dict.keys():
@@ -243,8 +249,7 @@ class DatabaseManager:
             stmt = stmt.where(Ticker.ticker_code.in_(ticker_codes))
 
         df = pd.read_sql(stmt, self.engine)
-        if not df.empty:
-            df.set_index('ticker_code', inplace=True) # 티커를 인덱스로
+        df.set_index('ticker_code', inplace=True) # 티커를 인덱스로
 
         return df
 
@@ -292,7 +297,7 @@ class DatabaseManager:
 
             except Exception as e:
                 logger.error(f"✗ Failed to load price data for {ticker_code}: {e}")
-                raise
+                continue
 
         logger.info(f"Bulk price load completed for {len(ticker_codes)} tickers")
         return df_dict
@@ -313,10 +318,7 @@ class DatabaseManager:
             try:
                 stmt = select(
                     TechnicalIndicator.date,
-                    TechnicalIndicator.ma_5,
-                    TechnicalIndicator.ma_20,
-                    TechnicalIndicator.ma_200,
-                    TechnicalIndicator.macd,
+                    *[getattr(TechnicalIndicator, ind) for ind in self.INDICATORS]
                 ).join(
                     Ticker, Ticker.ticker_id == TechnicalIndicator.ticker_id
                 ).where(
@@ -339,7 +341,7 @@ class DatabaseManager:
 
             except Exception as e:
                 logger.error(f"✗ Failed to load indicators for {ticker_code}: {e}")
-                raise
+                continue
 
         logger.info(f"Bulk indicator load completed for {len(ticker_codes)} tickers")
         return df_dict
