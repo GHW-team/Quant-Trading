@@ -1,0 +1,61 @@
+name: Tests
+
+# 언제 실행할지 (trigger)
+on:
+  push:
+    branches: [ main ]  # main, master, dev 브랜치에 push할 때
+  pull_request:
+    branches: [ main ]        # PR 생성 시
+
+# 실행할 작업들
+jobs:
+  test:
+    runs-on: ubuntu-latest  # Ubuntu 최신 버전에서 실행
+    
+    strategy:
+      matrix:
+        python-version: ['3.11']  # Python 3.11 사용
+    
+    steps:
+    # 1. 코드 체크아웃 (GitHub에서 코드 가져오기)
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # 2. Python 설치
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    # 3. pip 캐시 설정 (의존성 설치 속도 향상)
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    # 4. 의존성 설치
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    # 5. 테스트 실행
+    - name: Run tests with pytest
+      run: |
+        pytest tests/ -v --tb=short
+    
+    # 6. (선택) 커버리지 측정
+    - name: Run tests with coverage
+      run: |
+        pip install pytest-cov
+        pytest tests/ --cov=src --cov-report=xml --cov-report=term
+    
+    # 7. (선택) 커버리지 결과를 Codecov에 업로드
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false

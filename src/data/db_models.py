@@ -59,9 +59,26 @@ class TechnicalIndicator(Base):
     indicator_id = Column(Integer, primary_key=True, autoincrement=True)
     date = Column(Date, nullable=False)
     ma_5 = Column(Float)
+    ma_10 = Column(Float)
     ma_20 = Column(Float)
+    ma_50 = Column(Float)
+    ma_60 = Column(Float)
+    ma_100 = Column(Float)
+    ma_120 = Column(Float)
     ma_200 = Column(Float)
     macd = Column(Float)
+    macd_hist = Column(Float)
+    macd_signal = Column(Float)
+    rsi = Column(Float)
+    bb_upper = Column(Float)
+    bb_mid = Column(Float)
+    bb_lower = Column(Float)
+    bb_pct = Column(Float)
+    atr = Column(Float)
+    hv = Column(Float)
+    stoch_k = Column(Float)
+    stoch_d = Column(Float)
+    obv = Column(Float)
     calculated_version = Column(String(30),default='v1.0')
     calculated_at = Column(DateTime(timezone=True), default=get_utc_now)
 
@@ -72,7 +89,6 @@ class TechnicalIndicator(Base):
         UniqueConstraint('ticker_id','date', name= 'uix_ticker_date_ind'),
         Index('idx_ticker_date_ind', 'ticker_id','date'),
     )
-
 
 def create_tables(db_path: str = 'data/database/stocks.db'):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)

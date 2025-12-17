@@ -13,16 +13,15 @@ logger = logging.getLogger(__name__)
 class DataPipeline:
     def __init__(
         self,
-        db_path: str = None,
-        max_workers: int = None,
-        max_retries: int = None,
+        db_path: str = 'data/database/stocks.db',
+        max_workers: int = 5,
+        max_retries: int = 3,
         batch_size_default: int = 100,
     ):
-        # config.yaml 또는 기본값에서 설정 로드
-        self.db_path = db_path or 'data/database/stocks.db'
+        self.db_path = db_path 
         self.batch_size_default = batch_size_default
-        max_workers = max_workers or 5
-        max_retries = max_retries or 3
+        max_workers = max_workers
+        max_retries = max_retries
 
         self.db_manager = DatabaseManager(db_path=self.db_path)
         self.fetcher = StockDataFetcher(
@@ -59,6 +58,9 @@ class DataPipeline:
         amount = int(period[:-1])
         unit = period[-1].lower()
 
+        if amount < 0:
+            raise ValueError(f"Period cannot be negativd : {amount}")
+
         if unit == 'y':
             start_dt = today.replace(year=today.year - amount)
         elif unit == 'm':
@@ -82,7 +84,7 @@ class DataPipeline:
         logger.debug(f"Converted period '{period}' to start_date={start_date}, end_date={end_date}")
         return start_date, end_date
 
-    def _calculate_extended_start_date(self, start_date: Optional[str], indicator_list: List[str]) -> Optional[str]:
+    def _calculate_extended_start_date(self, start_date: str, indicator_list: List[str]) -> Optional[str]:
         """
         지표 계산을 위해 '안전 마진'이 포함된 과거 시작 날짜를 계산합니다.
 
@@ -95,8 +97,6 @@ class DataPipeline:
         Returns:
             확장된 시작 날짜 (YYYY-MM-DD 형식), start_date가 None이면 None
         """
-        if not start_date:
-            return None
 
         # 필요한 룩백 일수 조회 (예: ma_200 -> 200일)
         lookback_days = IndicatorCalculator.get_lookback_days(indicator_list)
@@ -740,147 +740,3 @@ class DataPipeline:
             logger.info("DataPipeline closed successfully")
         except Exception as e:
             logger.error(f"Error closing pipeline: {e}")
-            
-            
-            
-# ==================== Convenience Functions ====================
-
-def run_pipeline(
-    ticker_list: Optional[List[str]] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    indicator_list: Optional[List[str]] = None,
-    db_path: str = None,
-) -> dict:
-    pipeline = DataPipeline(db_path=db_path)
-
-    return pipeline.run_full_pipeline(
-        ticker_list=ticker_list,
-        start_date=start_date,
-        end_date=end_date,
-        indicator_list=indicator_list,
-    )
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    print("\n" + "="*70)
-    print("DataPipeline 테스트")
-    print("="*70)
-
-    # [1] DataPipeline 초기화
-    print("\n[1] DataPipeline 초기화...")
-    try:
-        with DataPipeline() as pipeline:
-            print(f"✓ DataPipeline 생성 완료")
-            print(f"  - DB Path: {pipeline.db_path}")
-
-            # [2] _convert_period_to_dates() 정적 메서드 테스트
-            print("\n[2] _convert_period_to_dates() 테스트...")
-            try:
-                test_periods = ["1y", "6m", "3m", "1m", "1w"]
-                for period in test_periods:
-                    start_date, end_date = DataPipeline._convert_period_to_dates(period)
-                    print(f"✓ {period}: {start_date} ~ {end_date}")
-            except Exception as e:
-                print(f"✗ Period 변환 실패: {e}")
-
-            # [3] _calculate_extended_start_date() 테스트
-            print("\n[3] _calculate_extended_start_date() 테스트...")
-            try:
-                test_indicators = [
-                    ['ma_5'],
-                    ['ma_200'],
-                    ['ma_5', 'ma_20', 'ma_200', 'macd']
-                ]
-                base_date = "2024-01-01"
-                for indicators in test_indicators:
-                    extended_date = pipeline._calculate_extended_start_date(base_date, indicators)
-                    print(f"✓ {indicators}: {base_date} → {extended_date}")
-            except Exception as e:
-                print(f"✗ Extended date 계산 실패: {e}")
-
-            # [4] run_price_pipeline() 테스트
-            print("\n[4] run_price_pipeline() 테스트 (가격 데이터 수집/저장)...")
-            try:
-                korean_tickers = [
-                    "005930.KS",  # 삼성전자
-                    "000660.KS",  # SK하이닉스
-                ]
-                results = pipeline.run_price_pipeline(
-                    ticker_list=korean_tickers,
-                    period="2y",
-                    update_if_exists=True,
-                    batch_size=10
-                )
-
-                # run_price_pipeline은 {ticker: DataFrame} 딕셔너리 반환
-                print(f"✓ Price Pipeline 완료:")
-                if isinstance(results, dict) and len(results) > 0:
-                    for ticker, df in results.items():
-                        print(f"  - {ticker}: {len(df)} records returned")
-                else:
-                    print(f"  ⚠ No data returned")
-            except Exception as e:
-                print(f"✗ Price Pipeline 실패: {e}")
-
-            # [5] run_indicator_pipeline() 테스트
-            print("\n[5] run_indicator_pipeline() 테스트 (지표 계산/저장)...")
-            try:
-                korean_tickers = ["005930.KS"]  # 삼성전자
-                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
-
-                results = pipeline.run_indicator_pipeline(
-                    ticker_list=korean_tickers,
-                    indicator_list=indicator_list,
-                    start_date="2025-01-01",
-                    end_date="2025-10-01",
-                    version="v1.0",
-                    batch_size=10
-                )
-
-                # run_indicator_pipeline은 {ticker: DataFrame} 딕셔너리 반환
-                print(f"✓ Indicator Pipeline 완료:")
-                if isinstance(results, dict) and len(results) > 0:
-                    for ticker, df in results.items():
-                        print(f"  - {ticker}: {len(df)} records with indicators")
-                else:
-                    print(f"  ⚠ No data returned")
-            except Exception as e:
-                print(f"✗ Indicator Pipeline 실패: {e}")
-
-            # [6] run_full_pipeline() 테스트
-            print("\n[6] run_full_pipeline() 테스트 (전체 파이프라인)...")
-            try:
-                korean_tickers = ["005930.KS"]  # 삼성전자
-                indicator_list = ['ma_5', 'ma_20', 'ma_200', 'macd']
-
-                results = pipeline.run_full_pipeline(
-                    ticker_list=korean_tickers,
-                    period="1m",
-                    indicator_list=indicator_list,
-                    update_if_exists=True,
-                    version="v1.0",
-                    batch_size=10
-                )
-
-                # run_full_pipeline은 {ticker: DataFrame} 딕셔너리 반환 (with indicators)
-                print(f"✓ Full Pipeline 완료:")
-                if isinstance(results, dict) and len(results) > 0:
-                    for ticker, df in results.items():
-                        print(f"  - {ticker}: {len(df)} records with indicators")
-                        print(f"    Columns: {[col for col in df.columns if col in indicator_list]}")
-                else:
-                    print(f"  ⚠ No data returned")
-            except Exception as e:
-                print(f"✗ Full Pipeline 실패: {e}")
-
-            print(f"\n✓ DataPipeline 정상 종료")
-
-    except Exception as e:
-        print(f"✗ DataPipeline 초기화 실패: {e}")
-
-    print("\n" + "="*70)
-    print("모든 테스트 완료!")
-    print("="*70)

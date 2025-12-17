@@ -12,6 +12,19 @@ import numpy as np
 def sample_df_basic():
     """기본 시계열 데이터프레임 (가격 데이터)"""
     return pd.DataFrame({
+        'date': pd.date_range('2020-01-01', periods=1000),
+        'open': np.arange(100, 1100),
+        'high': np.arange(101, 1101),
+        'low': np.arange(99, 1099),
+        'close': np.arange(100, 1100),
+        'adj_close': np.arange(100, 1100),
+        'volume': np.arange(1000000, 1000000 + 1000)
+    })
+
+@pytest.fixture
+def sample_df_small():
+    """기본 시계열 데이터프레임 (가격 데이터)"""
+    return pd.DataFrame({
         'date': pd.date_range('2020-01-01', periods=100),
         'open': np.arange(100, 200),
         'high': np.arange(101, 201),
@@ -21,19 +34,41 @@ def sample_df_basic():
         'volume': np.arange(1000000, 1000000 + 100)
     })
 
-
 @pytest.fixture
 def sample_df_with_indicators(sample_df_basic):
-    """지표가 포함된 데이터프레임"""
+    """모든 보조지표 컬럼이 포함된 테스트용 데이터프레임"""
     df = sample_df_basic.copy()
+    
+    # 데이터 길이만큼의 랜덤값 생성을 위한 난수 생성기
+    n_rows = len(df)
 
-    # 간단한 이동평균 추가
-    df['ma_5'] = df['adj_close'].rolling(window=5).mean()
-    df['ma_20'] = df['adj_close'].rolling(window=20).mean()
-    df['ma_200'] = df['adj_close'].rolling(window=200).mean()
+    # 지표 : 실제 계산 대신 종가와 비슷한 값으로 채움
 
-    # MACD 간단 버전
-    df['macd'] = df['adj_close'].ewm(span=12).mean() - df['adj_close'].ewm(span=26).mean()
+    # 1. 이동평균선 (MA) - 단순히 종가에 약간의 노이즈를 섞어서 할당
+    ma_columns = ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200']
+    for col in ma_columns:
+        window_size = int(col.split('_')[1])
+        # 주의: NaN값 포함됨
+        df[col] = df['adj_close'].rolling(window=window_size).mean()
+
+    # 2. MACD 관련 - 0 근처의 작은 소수값 할당
+    for col in ['macd', 'macd_hist', 'macd_signal']:
+        df[col] = np.random.randn(n_rows)  # 표준정규분포 난수
+
+    # 3. 오실레이터 (0 ~ 100 범위) - RSI, Stochastic
+    for col in ['rsi', 'stoch_k', 'stoch_d']:
+        df[col] = np.random.uniform(20, 80, n_rows)
+
+    # 4. 볼린저 밴드 - 종가 기준으로 위아래 벌림
+    df['bb_mid'] = df['adj_close']
+    df['bb_upper'] = df['adj_close'] * 1.05  # 5% 위
+    df['bb_lower'] = df['adj_close'] * 0.95  # 5% 아래
+    df['bb_pct'] = np.random.uniform(0, 1, n_rows) # %B는 0~1 사이
+
+    # 5. 기타 지표
+    df['atr'] = df['adj_close'] * 0.02 # 변동성 (대략 주가의 2%)
+    df['hv'] = np.random.uniform(0.1, 0.5, n_rows) # 역사적 변동성
+    df['obv'] = df['volume'].cumsum() # 거래량 누적 (이건 간단해서 실제 로직 적용)
 
     return df
 
@@ -64,24 +99,6 @@ def sample_training_data(sample_df_labeled):
     y = clean_data['label'].astype(int)
 
     return X, y
-
-
-@pytest.fixture
-def sample_df_empty():
-    """빈 데이터프레임"""
-    return pd.DataFrame({
-        'date': [],
-        'adj_close': [],
-    })
-
-
-@pytest.fixture
-def sample_df_single_row():
-    """1개 행만 있는 데이터프레임"""
-    return pd.DataFrame({
-        'date': [pd.Timestamp('2020-01-01')],
-        'adj_close': [100],
-    })
 
 
 @pytest.fixture

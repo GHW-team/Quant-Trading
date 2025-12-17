@@ -4,7 +4,7 @@ from .db_models import Base, Ticker, DailyPrice, TechnicalIndicator, create_tabl
 from .db_manager import DatabaseManager
 from .data_fetcher import StockDataFetcher
 from .indicator_calculator import IndicatorCalculator
-from .pipeline import DataPipeline, run_pipeline
+from .pipeline import DataPipeline
 
 __all__ = [
     # Models
@@ -21,5 +21,4 @@ __all__ = [
     'IndicatorCalculator',
     # Pipeline
     'DataPipeline',
-    'run_pipeline',
 ]

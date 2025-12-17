@@ -34,9 +34,24 @@ indicators:
   # 계산할 지표 목록 (DB에 저장될 모든 지표)
   list:
     - "ma_5"        # 5일 이동평균
+    - "ma_10"
     - "ma_20"       # 20일 이동평균
+    - "ma_50"
+    - "ma_60"
+    - "ma_100"
+    - "ma_120"
     - "ma_200"      # 200일 이동평균
     - "macd"        # MACD
+    - "macd_hist"
+    - "macd_signal"
+    - "rsi"
+    - "bb_upper"
+    - "bb_mid"
+    - "bb_lower"
+    - "bb_pct"
+    - "atr"
+    - "hv"
+    - "obv"
 
   # 지표 계산 버전
   version: "v1.0"
@@ -82,10 +97,10 @@ model:
   # 학습에 사용할 피처
   features:
     # 모델 입력으로 사용할 컬럼 (DB에서 이 컬럼들이 존재해야 함)
-    columns: ['adj_close', 'ma_5', 'ma_20', 'ma_200', 'macd']
+    columns: ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_signal', 'macd_hist']
 
     # 데이터 파이프라인에서 계산할 지표 (위 data.indicators.list와 일치해야 함)
-    indicators: ['ma_5', 'ma_20', 'ma_200', 'macd']
+    indicators: ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200', 'macd', 'macd_signal', 'macd_hist']
 
   # 모델 저장 설정
   output:
