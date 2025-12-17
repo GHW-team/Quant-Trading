@@ -154,8 +154,8 @@ def main():
     ticker_codes = TickerUniverse().get(['KOSPI'])[:50]
 
     # 임시: 데이터 부족한 종목 제외
-    exclude_tickers = ['499790.KS', '017860.KS']
-    ticker_codes = [t for t in ticker_codes if t not in exclude_tickers]
+    #exclude_tickers = ['499790.KS', '017860.KS']
+    #ticker_codes = [t for t in ticker_codes if t not in exclude_tickers]
 
     #임시
     #data_config['ticker_codes']

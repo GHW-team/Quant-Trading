@@ -197,7 +197,7 @@ class MLSignalStrategy(bt.Strategy):
 
                     # 보유기간이 만기 되어도, 매수 신호가 다시 발생했다면 팔지 않고 보유.
                     if signal == 1:
-                        self.log(f'{data_name} HOLDING EXTENDED | Signal=1 (수수료 절약, 롤오버)')
+                        #self.log(f'{data_name} HOLDING EXTENDED | Signal=1 (수수료 절약, 롤오버)')
                         should_sell = False        # 매도 취소
                         self.holding_days[data_name] = 0  # 보유일 리셋 (새로 산 셈 침)
 
@@ -222,7 +222,7 @@ class MLSignalStrategy(bt.Strategy):
                         sell_reason = f"TAKE_PROFIT({profit_pct:.2%})"
                 
                 if should_sell:
-                    self.log(f'{data_name} SELL ORDER | Reason: {sell_reason}')
+                    #self.log(f'{data_name} SELL ORDER | Reason: {sell_reason}')
                     size_to_sell = self.getposition(data).size
                     self.orders[data_name] = self.sell(data=data, size=size_to_sell)
                     continue
@@ -246,8 +246,8 @@ class MLSignalStrategy(bt.Strategy):
                         size = int(target_value / price)
                         
                         if size > 0 and cash >= price * size:
-                            self.log(f'{data_name} BUY ORDER | '
-                                    f'Signal=1 | Price: {price:,.0f} | Size: {size} | Total: {price*size}')
+                            #self.log(f'{data_name} BUY ORDER | '
+                            #        f'Signal=1 | Price: {price:,.0f} | Size: {size} | Total: {price*size}')
                             self.orders[data_name] = self.buy(data=data, size=size)
                             current_positions += 1
                 elif signal == 0:
