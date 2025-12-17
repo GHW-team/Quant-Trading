@@ -26,6 +26,11 @@ class StockDataFetcher:
             max_workers: 동시 실행 스레드 수
             max_retries: 실패 시 재시도 횟수 (지수 백오프)
         """
+        if max_workers < 1:
+            raise ValueError("max_workers must be at least 1")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+
         self.max_workers = max_workers
         self.max_retries = max_retries
 
@@ -217,15 +222,3 @@ class StockDataFetcher:
         success_rate = len(results) / len(ticker_list) * 100 if ticker_list else 0
         logger.info("Fetch complete: %d/%d (%.1f%%)", len(results), len(ticker_list), success_rate)
         return results
-
-
-if __name__ == "__main__":
-    print("\n" + "=" * 70)
-    print("StockDataFetcher quick self-test")
-    print("=" * 70)
-
-    fetcher = StockDataFetcher(max_workers=2, max_retries=2)
-    sample = ["005930.KS"]
-    df_dict = fetcher.fetch_multiple_by_period(ticker_list=sample, period="1mo")
-    for t, df in df_dict.items():
-        print(f"{t}: {len(df)} rows, columns={list(df.columns)}")
