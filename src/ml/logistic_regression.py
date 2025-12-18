@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class LogisticRegressionHandler:
     """
-    [모델 통합 관리자] - 최종 경량화 버전
+    [모델 통합 관리자]
     """
     def __init__(self, feature_names: List[str]):
         self.feature_names = feature_names
@@ -92,7 +92,7 @@ class LogisticRegressionHandler:
         score = self.model.score(X_scaled, y)
         return {'test_accuracy': score, 'count': len(X)}
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: pd.DataFrame, threshold: float = 0.5) -> np.ndarray:
         """[실전/백테스트] 예측 (자동 스케일링)"""
         if not self.is_fitted:
             raise ValueError("모델이 학습되지 않았습니다.")
@@ -102,9 +102,16 @@ class LogisticRegressionHandler:
         #컬럼 순서 맞추기
         X = X[self.feature_names]
 
-        # 자동 스케일링 후 예측
+        # 자동 스케일링
         X_scaled = self.scaler.transform(X)
-        return self.model.predict(X_scaled)
+
+        #threshold 조정
+        if threshold == 0.5:
+            return self.model.predict(X_scaled)
+        else:
+            # 확률 계산
+            proba = self.model.predict_proba(X_scaled)[:,1]
+            return (proba>=threshold).astype(int)
 
     def save(self, path: str):
         """통합 저장"""

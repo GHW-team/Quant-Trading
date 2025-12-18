@@ -6,12 +6,15 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
+
 # 프로젝트 루트 경로 추가 (src 모듈을 찾기 위함)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.pipeline import DataPipeline
 from src.ml.labeler import Labeler
 from src.ml.logistic_regression import LogisticRegressionHandler
+#임시
+from src.data.all_ticker import TickerUniverse
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -28,7 +31,9 @@ def main():
     database_path = config['data']['database_path']
 
     # model.training 설정
-    tickers = config['model']['training']['tickers']
+    tickers = TickerUniverse().get(['KOSPI'])[:50]
+    #임시
+    #config['model']['training']['tickers']
     period = config['model']['training'].get('period')
     start_date = config['model']['training'].get('start_date')
     end_date = config['model']['training'].get('end_date')
@@ -70,6 +75,7 @@ def main():
                 'update_if_exists': True,
             }
 
+            print(f"티커 리스트 :{INDICATOR_LIST}")
             df_dict = pipeline.run_full_pipeline(
                 ticker_list=tickers,
                 indicator_list=INDICATOR_LIST,
@@ -77,6 +83,7 @@ def main():
                 end_date=end_date,
                 period=period,
             )
+            
 
         if not df_dict:
             logger.error("❌ DataPipeline에서 데이터를 로드할 수 없습니다. 데이터 설정을 확인하세요.")
