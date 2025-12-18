@@ -161,7 +161,8 @@ def run_full_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
         batch_size_default=config["batch_size"],
     ) as pipeline:
         results = pipeline.run_full_pipeline(
-            ticker_list=_resolve_tickers(config),
+            ## 임시수정!!
+            ticker_list=_resolve_tickers(config)[:50],
             start_date=config.get("start_date"),
             end_date=config.get("end_date"),
             period=config.get("period"),
