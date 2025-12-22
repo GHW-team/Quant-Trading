@@ -20,6 +20,7 @@ from .database import (
 
 from .mocks import (
     mock_yfinance,
+    mock_exchange_calendars,
 )
 
 from .config import (
@@ -44,6 +45,7 @@ __all__ = [
     'temp_model_dir',
     # Mocks
     'mock_yfinance',
+    'mock_exchange_calendars',
     # Config
     'sample_config',
     # Context Managers

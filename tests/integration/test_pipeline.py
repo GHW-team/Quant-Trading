@@ -14,54 +14,6 @@ from src.data.db_manager import DatabaseManager
 from src.data.data_fetcher import StockDataFetcher
 from src.data.indicator_calculator import IndicatorCalculator
 
-# _convert_period_to_dates
-class TestDataPipelineConvertPeriodToDates:
-    """Period 문자열 파싱 테스트"""
-    # ==================================
-    # 함수 정상 케이스 테스트
-    # ==================================
-    @pytest.mark.parametrize("period,min,max",[
-        ("1y",330,390),
-        ("6m",150,200),
-        ("1d",0,2),
-        ("1w",5,10),
-        ("0y",0,1),
-    ])
-    def test_convert_period(self, period, min, max):
-        """1년 period 변환"""
-        start_date, end_date = DataPipeline._convert_period_to_dates(period)
-
-        assert isinstance(start_date, str)
-        assert isinstance(end_date, str)
-
-        # 날짜 형식 검증
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-        diff_days = (end_dt- start_dt).days
-        assert min <= diff_days <= max
-
-    def test_period_format_yyyy_mm_dd(self):
-        """반환값이 YYYY-MM-DD 형식"""
-        start_date, end_date = DataPipeline._convert_period_to_dates('1y')
-
-        # YYYY-MM-DD 형식 검증
-        assert len(start_date) == 10
-        assert len(end_date) == 10
-        assert start_date[4] == '-'
-        assert start_date[7] == '-'
-    # ==================================
-    # 함수 에러 케이스 테스트
-    # ==================================
-    @pytest.mark.parametrize("period",[
-        ('invalid'),
-        ('1.5y'),
-        ('-1y')
-    ])
-    def test_invalid_period_raises_error(self,period):
-        """잘못된 period 형식"""
-        with pytest.raises(ValueError):
-            DataPipeline._convert_period_to_dates(period)
-
 # _calculate_extended_start_date
 class TestDataPipelineCalculateExtendedStartDate:
     """Lookback 시작 날짜 계산 테스트"""
@@ -332,6 +284,10 @@ class TestDataPipelineFullWorkflow:
                 # Mock 설정
                 mock_fetcher = MagicMock()
                 mock_fetcher_class.return_value = mock_fetcher
+
+                # _convert_period_to_dates Mock 추가
+                mock_fetcher._convert_period_to_dates.return_value = ('2023-01-01', '2023-12-31')
+
                 mock_fetcher.fetch_multiple_by_period.return_value = {
                     '005930.KS': pd.DataFrame({
                         'date': pd.date_range('2020-01-01', periods=100),
@@ -366,6 +322,10 @@ class TestDataPipelineFullWorkflow:
             with patch('src.data.pipeline.IndicatorCalculator') as mock_calc_class:
                 mock_fetcher = MagicMock()
                 mock_fetcher_class.return_value = mock_fetcher
+
+                # _convert_period_to_dates Mock 추가
+                mock_fetcher._convert_period_to_dates.return_value = ('2023-01-01', '2023-12-31')
+
                 mock_fetcher.fetch_multiple_by_period.return_value = {
                     '005930.KS': pd.DataFrame({
                         'date': pd.date_range('2020-01-01', periods=100),
