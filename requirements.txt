@@ -10,6 +10,10 @@ pandas==2.2.3                # Python 3.11 지원, NumPy 1.26 호환
 
 # ===== 데이터 수집 =====
 yfinance==0.2.66            # 최신 안정 버전
+pykrx==1.0.51
+finance-datareader==0.9.96
+ratelimit==2.2.1
+exchange_calendars==4.11.3
 
 # ===== 데이터베이스 =====
 sqlalchemy==2.0.36           # 2.0.36

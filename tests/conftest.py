@@ -28,6 +28,7 @@ from tests.fixtures import (
     temp_model_dir,
     # Mocks
     mock_yfinance,
+    mock_exchange_calendars,
     # Config
     sample_config,
     # Context Managers (자동으로 close 호출)

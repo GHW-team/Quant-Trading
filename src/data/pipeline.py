@@ -183,7 +183,7 @@ class DataPipeline:
 
             # ============ Pre-processing: Period를 start_date/end_date로 변환 ============
             if period:
-                start_date, end_date = self._convert_period_to_dates(period)
+                start_date, end_date = self.fetcher._convert_period_to_dates(period)
                 logger.info(f"Period '{period}' converted to start_date={start_date}, end_date={end_date}")
 
             # ============ Lookback 계산 및 적용 (안전 마진 포함) ============

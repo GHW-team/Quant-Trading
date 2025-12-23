@@ -26,3 +26,16 @@ def mock_yfinance():
         }, index=pd.date_range('2020-01-01', periods=3, name = 'Date'))
 
         yield mock
+
+@pytest.fixture
+def mock_exchange_calendars():
+    """exchange_calendars Mock"""
+    with patch('exchange_calendars.get_calendar') as mock:
+        mock_instance = MagicMock()
+        mock.return_value = mock_instance
+
+        mock_instance.sessions_in_range.return_value = pd.DatetimeIndex(
+            ['2020-01-01', '2020-01-02', '2020-01-03','2020-01-04']
+        ).tz_localize('UTC')
+
+        yield mock
