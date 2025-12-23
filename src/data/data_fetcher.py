@@ -214,7 +214,7 @@ class StockDataFetcher:
             )
 
         # 논리적 유효성 검사
-        if start_dt > end_dt:
+        if start_dt >= end_dt:
             raise ValueError(
                 f"start_date ({start_date}) cannot be later than end_date ({end_date})"
             )
@@ -320,7 +320,8 @@ class StockDataFetcher:
         success_rate = len(results) / len(ticker_list) * 100 if ticker_list else 0
 
         # Fetch 실패한 티커 로깅
-        logger.info(f"Failed Tickers: {failed_tickers}")
+        if failed_tickers:
+            logger.info(f"Failed Tickers: {failed_tickers}")
 
         # 성공률 로깅
         logger.info("Fetch complete: %d/%d (%.1f%%)", len(results), len(ticker_list), success_rate)
