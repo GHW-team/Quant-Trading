@@ -38,7 +38,12 @@ class IndicatorCalculator:
     
     @staticmethod
     def _calc_atr(df:pd.DataFrame, length: int)->pd.Series:
-        return ta.atr(df['high'], df['low'], df['close'], length = length)
+        adj_factor = df['adj_close'] / df['close']
+        
+        adj_high = df['high'] * adj_factor
+        adj_low = df['low'] * adj_factor
+        
+        return ta.atr(adj_high, adj_low, df['adj_close'], length=length)
     
     @staticmethod
     def _calc_hv(df: pd.DataFrame, length: int, annual_factor: int=252)-> pd.Series:
@@ -48,14 +53,21 @@ class IndicatorCalculator:
     
     @staticmethod
     def _calc_stoch(df: pd.DataFrame, k: int, d: int)-> pd.DataFrame:
-        #%K, %D컬럼 반환
-        stoch_df = ta.stoch(df['high'], df['low'], df['close'], k=k, d=d)
-        #부족분은 NaN으로 유지
+        adj_factor = df['adj_close'] / df['close']
+        adj_high = df['high'] * adj_factor
+        adj_low = df['low'] * adj_factor
+        
+        stoch_df = ta.stoch(adj_high, adj_low, df['adj_close'], k=k, d=d)
         return stoch_df.reindex(df.index)
     
     @staticmethod
     def _calc_obv(df: pd.DataFrame)->pd.Series:
-        return ta.obv(df['close'], df['volume'])
+        adj_factor = df['adj_close'] / df['close']
+        
+        adj_volume = df['volume'] / adj_factor
+        
+        # 3. 보정된 가격과 보정된 거래량으로 OBV 계산
+        return ta.obv(df['adj_close'], adj_volume)
     
 
     #rsi,볼린저밴드,atr,hv,스토캐스틱 등은 현재 기본값으로 설정해뒀으니 이 값을 바꿀 경우 이름을 바꿔주기바람
@@ -134,26 +146,23 @@ class IndicatorCalculator:
             max_lookback = max(max_lookback, days)
 
         return max_lookback
-
-    def calculate_indicators(
-        self,
-        df: pd.DataFrame,
-        indicator_list: Optional[List[str]] = None
-        )-> Optional[pd.DataFrame]:
-
-        # -------- 입력 검증 단계 --------
-        # DataFrame validation
+    @staticmethod
+    def _validate_input_df(df: pd.DataFrame):
+        # -------- 빈 df인지 --------
         if df.empty:
             logger.error("Empty dataframe provided")
             raise ValueError("Cannot calculate indicators: empty dataframe")
 
-        # Check for required column 'adj_close'
-        if 'adj_close' not in df.columns:
-            available_cols = list(df.columns)
-            logger.error(f"Required column 'adj_close' not found. Available columns: {available_cols}")
-            raise ValueError(f"Cannot calculate indicators: required column 'adj_close' not found. Available: {available_cols}")
+        # -------- 필수 컬럼 검증 -------
+        necessary_columns = ['date', 'high', 'low', 'close','adj_close','volume']
 
-        # Check for 'date' column and validate ordering
+        for col in necessary_columns:
+            if col not in df.columns:
+                available_cols = list(df.columns)
+                logger.error(f"Required column {col} not found. Available columns: {available_cols}")
+                raise ValueError(f"Cannot calculate indicators: required column 'adj_close' not found. Available: {available_cols}")
+
+        # -------- 'date' 컬럼 데이터 타입 검증 --------
         if 'date' in df.columns:
             if not pd.api.types.is_datetime64_any_dtype(df['date']):
                 logger.error(f"'date' column exists but is not datetime type: {df['date'].dtype}")
@@ -162,30 +171,37 @@ class IndicatorCalculator:
                     f"got {df['date'].dtype}"
                 )
 
-            if not df['date'].is_monotonic_increasing:
-                logger.error("'date' column is not sorted in chronological order")
-                raise ValueError(
-                    "Cannot calculate indicators: 'date' column must be sorted in "
-                    "chronological (ascending) order for accurate time-series calculations. "
-                    "Please sort DataFrame by date before calling calculate_indicators()."
-                )
+        # -------- 'date' 컬럼 정렬 검증 --------
+        if not df['date'].is_monotonic_increasing:
+            logger.error("'date' column is not sorted in chronological order")
+            raise ValueError(
+                "Cannot calculate indicators: 'date' column must be sorted in "
+                "chronological (ascending) order for accurate time-series calculations. "
+                "Please sort DataFrame by date before calling calculate_indicators()."
+            )
 
-            logger.debug(f"Date column validated: {len(df)} rows from {df['date'].min()} to {df['date'].max()}")
+        logger.debug(f"Date column validated: {len(df)} rows from {df['date'].min()} to {df['date'].max()}")
+
+    def calculate_indicators(
+        self,
+        df: pd.DataFrame,
+        indicator_list: Optional[List[str]] = None
+        )-> Optional[pd.DataFrame]:
+
+        # -------- 입력 검증 단계 --------
+        self._validate_input_df(df)
 
         # Default setting: All indicators
         if indicator_list == None:
             indicator_list = self.get_available_indicators()
             logger.warning(f"No input indicators specified. Calculating all indicators: {indicator_list}")
+        self._validate_indicators(indicator_list)
 
         # Log input data info
         logger.debug(f"Input DataFrame: {len(df)} rows, columns={list(df.columns)}")
 
-        # Validate indicators before calculation
-        self.validate_indicators(indicator_list)
-
         # -------- 지표 계산 단계 --------
         result_df = df.copy()
-        errors = {}
 
         logger.debug(f"Start calculating {len(indicator_list)} indicators for {len(df)} rows")
         for indicator in indicator_list:
@@ -200,57 +216,26 @@ class IndicatorCalculator:
                 if len(df) < lookback:
                     logger.warning(
                         f"Insufficient data for {indicator}: need {lookback} rows (warmup), "
-                        f"but have {len(df)} rows. Continuing with available data."
                     )
 
                 # Calculate indicator
                 calculated_indicator = calc_func(df)
 
-                # Validate result
+                # Fill indicator
                 if calculated_indicator is None:
-                    error_detail = (
-                        f"Calculation returned None. This suggests the indicator function "
-                        f"({calc_func.__name__ if hasattr(calc_func, '__name__') else 'lambda'}) "
-                        f"did not produce output. Check if data length ({len(df)}) is sufficient."
-                    )
-                    logger.error(f"{indicator}: {error_detail}")
-                    errors[indicator] = error_detail
-                    continue
+                    calculated_indicator = pd.Series(np.nan, index=df.index)
+                    logger.info(f"Fill {indicator} with NaN")
 
-                # Check if result is Series and has valid length
-                if not isinstance(calculated_indicator, pd.Series):
-                    error_detail = f"Expected Series but got {type(calculated_indicator).__name__}"
-                    logger.error(f"{indicator}: {error_detail}")
-                    errors[indicator] = error_detail
-                    continue
-
+                # Output validation
                 if len(calculated_indicator) != len(df):
-                    error_detail = f"Result length ({len(calculated_indicator)}) != input length ({len(df)})"
-                    logger.error(f"{indicator}: {error_detail}")
-                    errors[indicator] = error_detail
-                    continue
+                    raise ValueError(f"Calculated indicator length INVALID!! Input df:{len(df)}, Calculated indicator: {len(calculated_indicator)}")
 
                 # Assign to result
                 result_df[indicator] = calculated_indicator
 
-                # Log NaN info
-                nan_count = calculated_indicator.isna().sum()
-                nan_ratio = (nan_count / len(calculated_indicator) * 100) if len(calculated_indicator) > 0 else 0
-                logger.debug(
-                    f"✓ {indicator}: {len(calculated_indicator)} values, "
-                    f"{nan_count} NaN ({nan_ratio:.1f}%)"
-                )
-
             except Exception as e:
-                error_detail = f"Exception during calculation: {str(e)} (Type: {type(e).__name__})"
-                logger.error(f"{indicator}: {error_detail}")
-                errors[indicator] = error_detail
-
-        # Check results
-        if errors:
-            error_msg = f"Failed to calculate {len(errors)}/{len(indicator_list)} indicators: {errors}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+                logger.error(f"Unexpected Error: {e}")
+                raise
 
         self.calculated_indicators = indicator_list
         logger.debug(f"✓ All {len(indicator_list)} indicators calculated successfully")
@@ -263,7 +248,7 @@ class IndicatorCalculator:
         return list(IndicatorCalculator.INDICATORS_FUNCTIONS.keys())
 
     @staticmethod
-    def validate_indicators(indicator_list)->None:
+    def _validate_indicators(indicator_list)->None:
         invalid = []
         available = IndicatorCalculator.INDICATORS_FUNCTIONS.keys()
 

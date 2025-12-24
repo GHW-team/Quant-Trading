@@ -163,18 +163,17 @@ class DataPipeline:
                 logger.info(f"Period '{period}' converted to start_date={start_date}, end_date={end_date}")
 
             # ============ Lookback 계산 및 적용 (안전 마진 포함) ============
-            # 원래 요청한 start_date 벡압
-            original_start_date = start_date  
-            # 룩백 적용된 날짜 적용
-            start_date = self._calculate_extended_start_date(start_date, indicator_list)
+            # 룩백 적용하여 확장된 시작날짜
+            extended_start_date = self._calculate_extended_start_date(start_date, indicator_list)
 
             # 가격 파이프라인
+            logger.info("")
             logger.info(f"{'='*60}")
             logger.info(f"Price data pipeline Start (included lookback period)")
             logger.info(f"{'='*60}")
             all_price_dict = self.run_price_pipeline(
                 ticker_list=ticker_list,
-                start_date=start_date,
+                start_date=extended_start_date,
                 end_date=end_date,
                 period=period,
                 interval=interval,
@@ -185,20 +184,23 @@ class DataPipeline:
 
             # 가격 필터링
             filtered_price_dict = {}
-            logger.info(f"Filtering price data by original start date...")
+            logger.info(f"____Filtering price data by original start date...____")
             for ticker, df in all_price_dict.items():
-                filtered_dict = df[df['date'] >= original_start_date]
+                filtered_dict = df[df['date'] >= start_date]
                 if filtered_dict.empty:
                     logger.info(f"{ticker}: excluded from price data. No price data in original date period")
                 else:
                     filtered_price_dict[ticker] = filtered_dict
 
             success_rate = (len(filtered_price_dict.keys()) / len(all_price_dict.keys())) * 100 if all_price_dict.keys() else 0 
-            logger.info(f"Filtering Complete. Success rate: {success_rate} %")
+            logger.info(f"Filtering Complete. Success rate: {success_rate:.2f} %")
 
+            logger.info("")
             logger.info(f"{'='*60}")
             logger.info(f"Indicator data pipeline Start")
             logger.info(f"{'='*60}")
+            logger.info("")
+
             # 지표 파이프라인
             all_calculated_dict = self.run_indicator_pipeline(
                 ticker_list=ticker_list,
@@ -229,7 +231,9 @@ class DataPipeline:
 
             final_success_rate = (len(merged_dict.keys()) / len(ticker_list)) * 100
             logger.info(f"{'='*60}")
-            logger.info(f"All data pipeline Completed. Success count: {len(merged_dict.keys())}. Success rate: {final_success_rate}")
+            logger.info(f"All data pipeline Completed.")
+            logger.info(f"Final Success Count: {len(merged_dict.keys())}")
+            logger.info(f"Final Success Rate: {final_success_rate:.2f} %")
             logger.info(f"{'='*60}")
 
             return merged_dict
@@ -299,13 +303,14 @@ class DataPipeline:
                 batch_tickers = ticker_list[i : i + batch_size]
                 batch_num = (i // batch_size) + 1
 
-                logger.info(f"{'='*60}")
+                logger.info(f"{'-'*60}")
                 logger.info(f"Batch {batch_num}/{num_batches}: Fetching {len(batch_tickers)} tickers")
-                logger.info(f"{'='*60}")
+                logger.info(f"{'-'*60}")
 
                 # Step 1: Fetch batch data
                 try:
-                    logger.info(f"Step 1: Fetching data for batch {batch_num}...")
+                    logger.info("")
+                    logger.info(f"____Step 1: Fetching data for batch {batch_num}...____")
                     batch_price_dict = self.fetcher.fetch_multiple_by_date(
                         ticker_list=batch_tickers,
                         start_date=start_date,
@@ -326,7 +331,8 @@ class DataPipeline:
 
                 # Step 2: Save batch data using bulk save function
                 try:
-                    logger.info(f"Step 2: Saving price data for batch {batch_num}...")
+                    logger.info("")
+                    logger.info(f"____Step 2: Saving price data for batch {batch_num}...____")
 
                     logger.info(f"Saving batch {batch_num} to database...")
                     batch_save_results = self.db_manager.save_price_data(
@@ -347,6 +353,7 @@ class DataPipeline:
                 del batch_price_dict
 
             #============Summary=============
+            logger.info("")
             logger.info("="*60)
             logger.info("Price Pipeline Summary")
             logger.info("="*60)
@@ -362,13 +369,14 @@ class DataPipeline:
             success_rate = (len(all_price_dict) / len(ticker_list)) * 100 if ticker_list else 0 
 
             logger.info(f"Total processed: {len(all_price_dict)}/{len(ticker_list)}")
-            logger.info(f"Total success rate: {success_rate} %")
+            logger.info(f"Total success rate: {success_rate:.2f} %")
             if failed_tickers:
                 logger.info(f"Total failed tickers: {failed_tickers}")
 
             logger.info(f"{'='*60}")
             logger.info(f"✓ Price pipeline completed successfully")
             logger.info(f"{'='*60}")
+            logger.info("")
 
             return all_price_dict
 
@@ -428,7 +436,7 @@ class DataPipeline:
             start_date = self._calculate_extended_start_date(start_date, indicator_list)
 
             # ============ Price 데이터 불러오기 =============
-            logger.info(f"Loading price data...")
+            logger.info(f"____Loading price data...____")
             price_dict =  self.run_price_pipeline(
                 ticker_list=ticker_list,
                 start_date=start_date,
@@ -457,17 +465,18 @@ class DataPipeline:
                 batch_tickers = ticker_list[i : i + batch_size]
                 batch_num = (i // batch_size) + 1
 
-                logger.info(f"{'='*60}")
+                logger.info(f"{'-'*60}")
                 logger.info(f"Batch {batch_num}/{num_batches}: Processing {len(batch_tickers)} tickers")
-                logger.info(f"{'='*60}")
+                logger.info(f"{'-'*60}")
 
-                # Step 1: Set price data for batch
+                # Step 0: Set price data for batch
                 batch_price_dict = {ticker : price_dict[ticker].copy() for ticker in batch_tickers if ticker in price_dict}
 
-                # Step 2: Calculate indicators for batch
+                # Step 1: Calculate indicators for batch
                 batch_calculated_dict = {}
                 try:
-                    logger.info(f"Calculating indicators for batch {batch_num}...")
+                    logger.info("")
+                    logger.info(f"____Step1: Calculating indicators for batch {batch_num}...____")
                     for ticker, df in batch_price_dict.items():
                         try:
                             calculated_df = self.calculator.calculate_indicators(
@@ -489,14 +498,15 @@ class DataPipeline:
                     logger.error(f"Failed to calculate indicators for batch {batch_num}: {e}")
                     continue
 
-                # Step 3: Save indicators (original_start_date 기준으로 필터링)
+                # Step 2: Save indicators (original_start_date 기준으로 필터링)
                 try:
-                    logger.info(f"Saving indicators for batch {batch_num} to database...")
+                    logger.info("")
+                    logger.info(f"____Step2: Saving indicators for batch {batch_num} to database...____")
 
                     # original_start_date 이후의 지표 데이터만 필터링
                     filtered_indicator_dict = {}
 
-                    logger.info(f"Filtering indicator data by original start date...")
+                    logger.info(f"___Filtering indicator data by original start date...___")
                     for ticker, df in batch_calculated_dict.items():
                         # 필터링
                         filtered_df = df[df['date'] >= original_start_date].copy()
@@ -517,10 +527,13 @@ class DataPipeline:
                                 #Ticker별 통계
                                 ticker_total_cells = filtered_df.size
                                 ticker_nan_ratio = (ticker_nan_count / ticker_total_cells) * 100
-                                logger.warning(f"{ticker}: NaN ratio: {ticker_nan_ratio}, NaN count: {ticker_nan_count}/{ticker_total_cells}")
+                                logger.warning(f"{ticker}: NaN ratio: {ticker_nan_ratio:.2f} %, NaN count: {ticker_nan_count}/{ticker_total_cells}")
                                 
                             # 결과에 추가
                             filtered_indicator_dict[ticker] = filtered_df
+                    
+                    filtered_success_rate = (len(batch_calculated_dict) / len(filtered_indicator_dict)) * 100
+                    logger.info(f"Filtering Complete. Success rate: {filtered_success_rate:.2f} %")
 
                     if filtered_indicator_dict:
                         batch_save_results = self.db_manager.save_indicators(
@@ -542,6 +555,7 @@ class DataPipeline:
                 del batch_calculated_dict
 
             #============Summary=============
+            logger.info("")
             logger.info("="*60)
             logger.info("Indicator Pipeline Summary")
             logger.info("="*60)
@@ -558,7 +572,7 @@ class DataPipeline:
             success_rate = (len(all_calculated_dict) / len(price_dict)) * 100 if price_dict else 0
 
             logger.info(f"Total processed: {len(all_calculated_dict)}/{len(price_dict.keys())}")
-            logger.info(f"Total success rate: {success_rate} %")
+            logger.info(f"Total success rate: {success_rate:.2f} %")
             if failed_tickers:
                 logger.info(f"Total failed tickers: {failed_tickers}")
 
@@ -566,6 +580,7 @@ class DataPipeline:
             logger.info(f"{'='*60}")
             logger.info(f"✓ Indicator pipeline completed successfully")
             logger.info(f"{'='*60}")
+            logger.info("")
 
             return all_calculated_dict
 
