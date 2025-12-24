@@ -2,6 +2,8 @@
 # yfinance로 OHLCV를 수집하고 병렬 처리/재시도/컬럼 정규화를 수행하는 헬퍼
 import logging
 import time
+import yaml
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
@@ -25,6 +27,7 @@ class StockDataFetcher:
         self,
         max_workers: int = 3,
         max_retries: int = 3,
+        custom_holidays_path: str = "config/market_holidays.yaml"
     ):
         """
         Args:
@@ -38,6 +41,13 @@ class StockDataFetcher:
 
         self.max_workers = max_workers
         self.max_retries = max_retries
+
+        # 커스텀 휴장일 로드
+        self.custom_holidays = self._load_custom_holidays(custom_holidays_path)
+
+        # calendar 캐시 추가
+        self.calendar_cache = {}
+
     
     # ------------------------------------------------------------------ #
     # 헬퍼 함수
@@ -95,6 +105,43 @@ class StockDataFetcher:
             return 'XNYS'
         return None
     
+    @staticmethod
+    def _load_custom_holidays(config_path: str) -> dict:
+        """
+        수동으로 추가한 휴장일을 YAML에서 로드
+        
+        Returns:
+            {
+                'XKRX': [datetime(2022, 1, 3), datetime(2022, 5, 9), ...],
+                'XNYS': [...],
+            }
+        """
+        try:
+            path = Path(config_path)
+            if not path.exists():
+                logger.warning(f"Custom holidays file not found: {config_path}")
+                return {}
+            
+            with open(path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            # 문자열 날짜를 datetime으로 변환
+            holidays_dict = {}
+            for exchange, date_list in config.items():
+                if date_list:
+                    holidays_dict[exchange] = [
+                        pd.to_datetime(date) for date in date_list
+                    ]
+                else:
+                    holidays_dict[exchange] = []
+            
+            logger.info(f"Loaded custom holidays: {holidays_dict}")
+            return holidays_dict
+        
+        except Exception as e:
+            logger.error(f"Failed to load custom holidays: {e}")
+            return {}
+    
     def _validate_and_fill_gaps(
             self, 
             start_date: str,
@@ -104,9 +151,10 @@ class StockDataFetcher:
         """
         1.시장 거래일의 데이터와 다운받은 데이터를 대조하여 누락된 날짜를 NaN으로 채움
         2.목표 fetch 기간과 실제 fetch 된 데이터 거래 기간 대조 및 로깅
+        3.수동으로 추가한 휴장일 제외 (exchange_calendars 라이브러라가 놓친 날짜)
         """
-        cal_dict = {}
         validated_df_dict = {}
+        logged_holidays = set()
 
         for ticker, df in df_dict.items():
             try:
@@ -128,16 +176,17 @@ class StockDataFetcher:
                 df_end_date = df.index.max()
 
                 # 거래일 달력 불러오기
-                if exchange in cal_dict:
+                if exchange in self.calendar_cache:
                     # 이미 존재하면 활용
-                    cal = cal_dict[exchange]
+                    cal = self.calendar_cache[exchange]
                 else:
                     # 없는 경우 다운로드
                     cal = None
                     for attempt in range(1, self.max_retries + 1):
                         try:
                             cal = xcals.get_calendar(exchange)   
-                            cal_dict[exchange] = cal
+                            self.calendar_cache[exchange] = cal
+                            logger.debug(f"Loaded calendar for {exchange}")
                             break
                         except Exception as e:
                             # 실패 시 재시도 (최대 max_retires번)
@@ -155,20 +204,39 @@ class StockDataFetcher:
                 if date_list.tz is not None:
                     date_list = date_list.tz_localize(None)
                 
+                # 수동 휴장일 제외
+                if exchange in self.custom_holidays:
+                    custom_holidays_pd = pd.DatetimeIndex(self.custom_holidays[exchange])
+                    
+                    # 타임존 제거
+                    if custom_holidays_pd.tz is not None:
+                        custom_holidays_pd = custom_holidays_pd.tz_localize(None)
+                    
+                    # 수동 휴장일 제외
+                    excluded_dates = date_list.intersection(custom_holidays_pd)
+                    if not excluded_dates.empty and exchange not in logged_holidays:
+                        logger.debug(
+                            f"{exchange}: Excluding {len(excluded_dates)} custom holidays from trading days: "
+                            f"{[d.strftime('%Y-%m-%d') for d in excluded_dates]}"
+                        )
+                        logged_holidays.add(exchange)
+
+                    date_list = date_list.difference(custom_holidays_pd)
+
                 # 목표 fetch기간보다 fetch된 기간이 짧은 경우 로깅
                 target_date = cal.sessions_in_range(start_date,end_date)
                 target_start_date = target_date.min()
                 target_end_date = target_date.max()
 
                 if target_start_date != df_start_date or target_end_date != df_end_date:
-                    logger.info(f"{ticker}: Loaded less than the target period")
-                    logger.info(f"Fetched Date: {df_start_date} ~ {df_end_date}, Length: {len(df)}")
+                    logger.warning(f"{ticker}: Loaded less than the target period")
+                    logger.warning(f"Fetched Date: {df_start_date} ~ {df_end_date}, Length: {len(df)}")
 
                 # 누락된 날짜 탐지
                 missing_dates = date_list.difference(df.index)
                 if not missing_dates.empty:
                     logger.warning(f"{ticker}: Found {len(missing_dates)} missing trading days. Filling with NaN")
-                    logger.debug(f"Missing date list: {missing_dates.date}")
+                    logger.info(f"Missing date list: {missing_dates.date}")
 
                     # 누락된 날짜 채우기
                     df = df.reindex(date_list)
