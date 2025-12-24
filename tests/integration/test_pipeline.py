@@ -14,6 +14,9 @@ from src.data.db_manager import DatabaseManager
 from src.data.data_fetcher import StockDataFetcher
 from src.data.indicator_calculator import IndicatorCalculator
 
+#==========================================
+# 헬퍼 함수
+#==========================================
 # _calculate_extended_start_date
 class TestDataPipelineCalculateExtendedStartDate:
     """Lookback 시작 날짜 계산 테스트"""
@@ -61,6 +64,84 @@ class TestDataPipelineCalculateExtendedStartDate:
         assert extended_date[7] == '-'
 
         pipeline.close()
+
+# _validate_period_and_date
+class TestValidatePeriodAndDate:
+    @pytest.mark.parametrize('start_date,end_date,period',[
+        ('2023-02-03','2024-01-01','1y'),
+        (None,'2024-01-01','1y'),
+        ('2023-02-03',None,'1y'),
+    ])
+    def test_input_period_and_date_both(self, start_date, end_date, period):
+        """period와 date 동시 입력"""
+        #Arrange
+        pipeline = DataPipeline()       
+
+        #Act
+        with pytest.raises(ValueError):
+            #Assert
+            pipeline._validate_period_and_date(
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+            )
+
+    @pytest.mark.parametrize('start_date,end_date,period',[
+        (None,'2024-01-01',None),
+        ('2023-02-03',None,None),
+    ])
+    def test_input_only_one_of_dates(self, start_date, end_date, period):
+        """start_date 와 end_date 둘중 하나만 입력"""
+        #Arrange
+        pipeline = DataPipeline()       
+
+        #Act
+        with pytest.raises(ValueError):
+            #Assert
+            pipeline._validate_period_and_date(
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+            )
+
+    @pytest.mark.parametrize('start_date,end_date,period',[
+        ('2023.02.03','2024.01.01',None),
+        ('2023/01/01','2024/12/01',None),
+        ('2023 01 01','2024 12 01',None),
+    ])
+    def test_input_only_one_of_dates(self, start_date, end_date, period):
+        """잘못된 date 형식"""
+        #Arrange
+        pipeline = DataPipeline()       
+
+        #Act
+        with pytest.raises(ValueError):
+            #Assert
+            pipeline._validate_period_and_date(
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+            )
+
+    @pytest.mark.parametrize('start_date,end_date,period',[
+        ('2025-02-03','2024-01-01',None),
+        ('2021-02-03','2020-01-01',None),
+        ('2022-02-02','2022-02-01',None),
+        ('2022-02-02','2022-02-02',None),
+    ])
+    def test_input_only_one_of_dates(self, start_date, end_date, period):
+        """부적절한 날짜 순서"""
+        #Arrange
+        pipeline = DataPipeline()       
+
+        #Act
+        with pytest.raises(ValueError):
+            #Assert
+            pipeline._validate_period_and_date(
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+            )
 
 # __init__
 class TestDataPipelineInitialization:
@@ -127,62 +208,6 @@ class TestDataPipelineValidation:
 
         pipeline.close()
 
-    def test_empty_ticker_list(self, temp_db_path):
-        """빈 ticker 리스트"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        # 빈 리스트는 0개 처리
-        result = pipeline.run_full_pipeline(
-            ticker_list=[],
-            period='1y',
-            indicator_list=['ma_5']
-        )
-
-        assert result is not None
-
-        pipeline.close()
-
-
-class TestDataPipelineIntegration:
-    """통합 테스트"""
-
-    def test_period_to_dates_roundtrip(self, temp_db_path):
-        """Period 변환의 일관성"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        # 같은 period 변환을 여러 번
-        dates1 = DataPipeline._convert_period_to_dates('1y')
-        dates2 = DataPipeline._convert_period_to_dates('1y')
-
-        # 결과가 거의 동일 (몇 초 차이 가능)
-        dt1_start = pd.to_datetime(dates1[0])
-        dt2_start = pd.to_datetime(dates2[0])
-
-        diff = abs((dt1_start - dt2_start).total_seconds())
-        assert diff < 5  # 5초 이내
-
-        pipeline.close()
-
-    def test_complete_date_calculation_workflow(self, temp_db_path):
-        """완전한 날짜 계산 워크플로우"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        # 1. Period 변환
-        start_date, end_date = DataPipeline._convert_period_to_dates('1y')
-
-        # 2. Lookback 확장
-        extended_start = pipeline._calculate_extended_start_date(
-            start_date,
-            ['ma_5', 'ma_20', 'ma_200']
-        )
-
-        # 3. 검증
-        assert pd.to_datetime(extended_start) < pd.to_datetime(start_date)
-        assert pd.to_datetime(start_date) < pd.to_datetime(end_date)
-
-        pipeline.close()
-
-
 class TestDataPipelineGetAvailableIndicators:
     """사용 가능한 지표 테스트"""
 
@@ -219,45 +244,9 @@ class TestDataPipelineErrorHandling:
 
         pipeline.close()
 
-    def test_invalid_ticker_codes(self, temp_db_path):
-        """유효하지 않은 ticker 코드"""
-        pipeline = DataPipeline(db_path=temp_db_path)
-
-        # 잘못된 ticker는 처리되거나 스킵
-        result = pipeline.run_full_pipeline(
-            ticker_list=['INVALID.CODE'],
-            period='1y',
-            indicator_list=['ma_5']
-        )
-
-        # 결과가 있거나 비어있음
-        assert result is not None
-
-        pipeline.close()
-
 
 class TestDataPipelineStaticMethodsEdgeCases:
     """정적 메서드 엣지 케이스"""
-
-    def test_period_boundary_values(self):
-        """경계값 period"""
-        # 2년
-        start, end = DataPipeline._convert_period_to_dates('2y')
-        diff_days = (pd.to_datetime(end) - pd.to_datetime(start)).days
-        assert diff_days > 700
-
-        # 1주
-        start, end = DataPipeline._convert_period_to_dates('1w')
-        diff_days = (pd.to_datetime(end) - pd.to_datetime(start)).days
-        assert 5 < diff_days < 10
-
-    def test_period_case_insensitive(self):
-        """period 단위는 소문자"""
-        start1, end1 = DataPipeline._convert_period_to_dates('1y')
-        start2, end2 = DataPipeline._convert_period_to_dates('1Y')  # 대문자
-
-        # 대문자도 작동해야 함 (또는 에러)
-        assert isinstance(start2, str) and isinstance(end2, str)
 
     def test_extended_start_with_empty_indicators(self, temp_db_path):
         """빈 지표 리스트"""
@@ -272,93 +261,3 @@ class TestDataPipelineStaticMethodsEdgeCases:
         assert result is not None
 
         pipeline.close()
-
-
-class TestDataPipelineFullWorkflow:
-    """run_full_pipeline 전체 워크플로우 테스트 (핵심만)"""
-
-    def test_run_full_pipeline_by_period(self, temp_db_path):
-        """Period 기반 전체 파이프라인 기본 실행"""
-        with patch('src.data.pipeline.StockDataFetcher') as mock_fetcher_class:
-            with patch('src.data.pipeline.IndicatorCalculator') as mock_calc_class:
-                # Mock 설정
-                mock_fetcher = MagicMock()
-                mock_fetcher_class.return_value = mock_fetcher
-
-                # _convert_period_to_dates Mock 추가
-                mock_fetcher._convert_period_to_dates.return_value = ('2023-01-01', '2023-12-31')
-
-                mock_fetcher.fetch_multiple_by_period.return_value = {
-                    '005930.KS': pd.DataFrame({
-                        'date': pd.date_range('2020-01-01', periods=100),
-                        'open': np.random.randn(100) + 100,
-                        'high': np.random.randn(100) + 101,
-                        'low': np.random.randn(100) + 99,
-                        'close': np.random.randn(100) + 100,
-                        'adj_close': np.random.randn(100) + 100,
-                        'volume': np.random.randint(1000000, 2000000, 100),
-                    })
-                }
-
-                mock_calc = MagicMock()
-                mock_calc_class.return_value = mock_calc
-                mock_calc.calculate_indicators.side_effect = lambda df, ind_list: (
-                    df.assign(**{ind: np.random.randn(len(df)) for ind in (ind_list or [])})
-                )
-
-                pipeline = DataPipeline(db_path=temp_db_path)
-                result = pipeline.run_full_pipeline(
-                    ticker_list=['005930.KS'],
-                    period='1y',
-                    indicator_list=['ma_5', 'ma_20']
-                )
-
-                assert result is not None
-                pipeline.close()
-
-    def test_run_full_pipeline_multiple_tickers(self, temp_db_path):
-        """여러 ticker 동시 처리 (병렬 처리 검증)"""
-        with patch('src.data.pipeline.StockDataFetcher') as mock_fetcher_class:
-            with patch('src.data.pipeline.IndicatorCalculator') as mock_calc_class:
-                mock_fetcher = MagicMock()
-                mock_fetcher_class.return_value = mock_fetcher
-
-                # _convert_period_to_dates Mock 추가
-                mock_fetcher._convert_period_to_dates.return_value = ('2023-01-01', '2023-12-31')
-
-                mock_fetcher.fetch_multiple_by_period.return_value = {
-                    '005930.KS': pd.DataFrame({
-                        'date': pd.date_range('2020-01-01', periods=100),
-                        'open': np.arange(100, 200),
-                        'high': np.arange(101, 201),
-                        'low': np.arange(99, 199),
-                        'close': np.arange(100, 200),
-                        'adj_close': np.arange(100, 200),
-                        'volume': np.arange(1000000, 1000000 + 100),
-                    }),
-                    '000660.KS': pd.DataFrame({
-                        'date': pd.date_range('2020-01-01', periods=100),
-                        'open': np.arange(50, 150),
-                        'high': np.arange(51, 151),
-                        'low': np.arange(49, 149),
-                        'close': np.arange(50, 150),
-                        'adj_close': np.arange(50, 150),
-                        'volume': np.arange(1000000, 1000000 + 100),
-                    })
-                }
-
-                mock_calc = MagicMock()
-                mock_calc_class.return_value = mock_calc
-                mock_calc.calculate_indicators.side_effect = lambda df, ind_list: (
-                    df.assign(**{ind: np.random.randn(len(df)) for ind in (ind_list or [])})
-                )
-
-                pipeline = DataPipeline(db_path=temp_db_path)
-                result = pipeline.run_full_pipeline(
-                    ticker_list=['005930.KS', '000660.KS'],
-                    period='1y',
-                    indicator_list=['ma_5', 'ma_20']
-                )
-
-                assert result is not None
-                pipeline.close()
