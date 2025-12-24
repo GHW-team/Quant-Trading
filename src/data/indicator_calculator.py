@@ -178,7 +178,7 @@ class IndicatorCalculator:
             logger.warning(f"No input indicators specified. Calculating all indicators: {indicator_list}")
 
         # Log input data info
-        logger.info(f"Input DataFrame: {len(df)} rows, columns={list(df.columns)}")
+        logger.debug(f"Input DataFrame: {len(df)} rows, columns={list(df.columns)}")
 
         # Validate indicators before calculation
         self.validate_indicators(indicator_list)
@@ -253,7 +253,7 @@ class IndicatorCalculator:
             raise ValueError(error_msg)
 
         self.calculated_indicators = indicator_list
-        logger.info(f"✓ All {len(indicator_list)} indicators calculated successfully")
+        logger.debug(f"✓ All {len(indicator_list)} indicators calculated successfully")
         logger.debug(f"Result DataFrame: {len(result_df)} rows, {len(result_df.columns)} columns")
 
         return result_df    
