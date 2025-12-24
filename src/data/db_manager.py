@@ -88,7 +88,7 @@ class DatabaseManager:
         self.session.add(new_ticker)
         self.session.commit()
 
-        logger.info(f"✓ Created ticker: {ticker_code} (ID: {new_ticker.ticker_id})")
+        logger.debug(f"✓ Created ticker: {ticker_code} (ID: {new_ticker.ticker_id})")
         return new_ticker.ticker_id
 
     # ------------------------------------------------------------------ #
@@ -175,7 +175,7 @@ class DatabaseManager:
                     results[ticker_code] = 0
                     continue
 
-        logger.info(f"Bulk price save completed for {len(results)} tickers in single transaction")
+        logger.info(f"Price save completed for {len(results)} tickers")
         return results
     
     def save_indicators(

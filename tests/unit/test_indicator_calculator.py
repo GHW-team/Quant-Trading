@@ -22,6 +22,19 @@ INDICATORS = [
 #==========================================
 # 지표계산 함수
 #==========================================
+# _calc_atr
+class TestCalcAtr:
+    def test_denominator_zero(self, sample_df_basic):
+        #Assert 
+        calc = IndicatorCalculator()
+        df = sample_df_basic.copy()
+        df['close'] = 0
+
+        #Act
+        result = calc._calc_atr(df, 14)
+
+        #Assert
+        assert result.isna().sum() == len(df)
 
 # calculate_indicators
 class TestIndicatorCalculatorCalculateIndicators:
@@ -67,14 +80,19 @@ class TestIndicatorCalculatorCalculateIndicators:
     # 함수 엣지 케이스 테스트
     #==========================================
     def test_calculate_ma_200(self, sample_df_small):
-        """ma_200 계산 - 데이터 부족 시 skip"""
-        # 추후 calculate_indicators 수정 예정
+        """ma_200 계산 - 데이터 부족 시 None으로 fill"""
+        #Arrange
         calc = IndicatorCalculator()
 
+        #Act
         # sample_df_basic은 100개 행인데, ma_200은 205개 필요
-        # 따라서 ValueError 발생
-        with pytest.raises(ValueError, match="Calculation returned None"):
-            calc.calculate_indicators(sample_df_small, ['ma_200'])
+        df = calc.calculate_indicators(sample_df_small, ['ma_200'])
+
+        #Assert
+        #전부 NaN으로 채워짐
+        assert len(df['ma_200']) == len(sample_df_small)
+        assert df['ma_200'].isna().sum() == len(sample_df_small)
+        
 
     def test_calculate_default_indicators(self, sample_df_basic):
         """기본 지표 목록"""
@@ -119,7 +137,12 @@ class TestIndicatorCalculatorCalculateIndicators:
         # date가 섞여 있는 DataFrame 생성
         df = pd.DataFrame({
             'date': pd.to_datetime(['2023-01-03', '2023-01-01', '2023-01-02']),
-            'adj_close': [100, 101, 102]
+            'open': [100,201,302],
+            'high': [101, 201, 301],
+            'low': [99, 199, 299],
+            'close': [100,200,300],
+            'adj_close': [100, 101, 102],
+            'volume': [100000,200000,1100000],
         })
 
         # ValueError 발생 확인
@@ -133,7 +156,12 @@ class TestIndicatorCalculatorCalculateIndicators:
         # date가 문자열인 DataFrame
         df = pd.DataFrame({
             'date': ['2023-01-01', '2023-01-02', '2023-01-03'],  # str
-            'adj_close': [100, 101, 102]
+            'open': [100,201,302],
+            'high': [101, 201, 301],
+            'low': [99, 199, 299],
+            'close': [100,200,300],
+            'adj_close': [100, 101, 102],
+            'volume': [100000,200000,1100000],
         })
 
         # ValueError 발생 확인
@@ -142,10 +170,22 @@ class TestIndicatorCalculatorCalculateIndicators:
 
     def test_all_nan_values(self):
         """모든 NaN 값"""
+        #Arrange
         calc = IndicatorCalculator()
-        df = pd.DataFrame({'adj_close': [np.nan] * 10})
+        df = pd.DataFrame({
+            'date': pd.date_range('2020-01-01',periods=10), 
+            'open': [np.nan] * 10,
+            'high': [np.nan] * 10,
+            'low': [np.nan] * 10,
+            'close': [np.nan] * 10,
+            'adj_close': [np.nan] * 10,
+            'volume': [np.nan] * 10,
+        })
 
+        #Act
         result = calc.calculate_indicators(df, ['ma_5'])
+
+        #Assert
         assert 'ma_5' in result.columns
         assert result['ma_5'].isna().all()
 
@@ -197,25 +237,25 @@ class TestGetAvailableIndicators:
         assert isinstance(available, list)
         assert len(available) > 0 
 
-# validate_indicators
+# _validate_indicators
 class TestValidateIndicators:
-    """validate_indicators 함수 테스트"""
+    """_validate_indicators 함수 테스트"""
     
     def test_valid_indicators_pass(self):
         """유효한 지표 리스트는 통과"""
-        IndicatorCalculator.validate_indicators(['ma_5', 'macd', 'rsi'])
+        IndicatorCalculator._validate_indicators(['ma_5', 'macd', 'rsi'])
         # 에러 없이 통과해야 함
     
     def test_invalid_indicators_raise_error(self):
         """무효한 지표는 ValueError 발생"""
         with pytest.raises(ValueError, match="Invalid indicators"):
-            IndicatorCalculator.validate_indicators(['invalid_indicator'])
+            IndicatorCalculator._validate_indicators(['invalid_indicator'])
     
     def test_mixed_valid_invalid_indicators(self):
         """유효/무효 혼합 시 에러"""
         with pytest.raises(ValueError, match="Invalid indicators"):
-            IndicatorCalculator.validate_indicators(['ma_5', 'fake_indicator'])
+            IndicatorCalculator._validate_indicators(['ma_5', 'fake_indicator'])
     
     def test_empty_list(self):
         """빈 리스트는 통과"""
-        IndicatorCalculator.validate_indicators([])
+        IndicatorCalculator._validate_indicators([])

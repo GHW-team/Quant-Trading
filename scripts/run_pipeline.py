@@ -97,15 +97,17 @@ class ConfigLoader:
             raise ValueError(f"Missing required config fields: {missig_fields}")
         
         #설정 출력
-        self.logger.info("\n%s", "=" * 70)
-        self.logger.info("Final Configuration")
+        self.logger.info("")
+        self.logger.info("%s", "=" * 70)
+        self.logger.info("Configuration")
         self.logger.info("%s", "=" * 70)
         self.logger.info("Tickers: %s", config.get("tickers") or config.get("exchanges"))
         period_str = config.get("period") or f"{config.get('start_date')} ~ {config.get('end_date')}"
         self.logger.info("Period: %s", period_str)
         self.logger.info("Indicators: %s", config["indicators"])
         self.logger.info("Database: %s", config["database_path"])
-        self.logger.info("%s\n", "=" * 70)
+        self.logger.info("%s", "=" * 70)
+        self.logger.info("")
 
         return config
 
@@ -129,9 +131,11 @@ def _resolve_tickers(config: Dict[str, Any]) -> Any:
 
 
 def run_full_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
-    logger.info("\n" + "=" * 70)
+    logger.info("")
+    logger.info("=" * 70)
     logger.info("▶ Full Pipeline 실행 (Fetch → Save → Calculate → Save Indicators)")
     logger.info("=" * 70)
+    logger.info("")
 
     with DataPipeline(
         db_path=config["database_path"],
@@ -151,13 +155,14 @@ def run_full_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
             version=config["indicator_version"],
             batch_size=config["batch_size"],
         )
-        _print_results(results, logger)
 
 
 def run_price_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
-    logger.info("\n" + "=" * 70)
+    logger.info("")
+    logger.info("=" * 70)
     logger.info("▶ Price Pipeline 실행 (Fetch → Save Price Data)")
     logger.info("=" * 70)
+    logger.info("")
 
     with DataPipeline(
         db_path=config["database_path"],
@@ -174,13 +179,14 @@ def run_price_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
             update_if_exists=config["update_if_exists"],
             batch_size=config["batch_size"],
         )
-        _print_results(results, logger)
 
 
 def run_indicator_pipeline(config: Dict[str, Any], logger: logging.Logger) -> None:
-    logger.info("\n" + "=" * 70)
+    logger.info("")
+    logger.info("=" * 70)
     logger.info("▶ Indicator Pipeline 실행 (Load → Calculate → Save)")
     logger.info("=" * 70)
+    logger.info("")
 
     with DataPipeline(
         db_path=config["database_path"],
@@ -196,12 +202,6 @@ def run_indicator_pipeline(config: Dict[str, Any], logger: logging.Logger) -> No
             version=config["indicator_version"],
             batch_size=config["batch_size"],
         )
-        _print_results(results, logger)
-
-
-def _print_results(results: Any, logger: logging.Logger) -> None:
-    logger.info("Result summary: %s", results.get("summary"))
-
 
 # ============================================
 # CLI 파서

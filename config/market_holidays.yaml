@@ -1,0 +1,12 @@
+# 수동으로 추가한 휴장일 (exchange_calendars가 놓친 날들)
+# Format: YYYY-MM-DD
+
+XKRX:  # 한국 (KOSPI/KOSDAQ)
+  - "2022-01-03"
+  - "2022-05-09"
+
+XNYS:  # 미국 (NYSE)
+  # 필요시 추가
+
+XNAS:  # 미국 (NASDAQ)
+  # 필요시 추가
