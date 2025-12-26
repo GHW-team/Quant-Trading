@@ -104,6 +104,30 @@ class DataPipeline:
                     f"start_date ({start_date}) cannot be later than end_date ({end_date})"
                 )
 
+    def _to_datetime_safe(self, date_like):
+        if date_like is None:
+            return None
+        return pd.to_datetime(date_like)
+
+    def _coverage_ok(self, df: pd.DataFrame, start_date: Optional[str], end_date: Optional[str], tol_days: int = 7) -> bool:
+        """DB에서 불러온 데이터가 요청 구간을 '대략' 커버하는지 검사한다.
+
+        - 주말/휴일로 인해 start/end와 정확히 일치하지 않을 수 있어 tol_days(기본 7일) 허용
+        - 엄밀한 거래일 캘린더를 쓰지 않고, 최소/최대 날짜 기반으로 간단히 판단
+        """
+        if df is None or df.empty or "date" not in df.columns:
+            return False
+        s = self._to_datetime_safe(start_date)
+        e = self._to_datetime_safe(end_date)
+        tol = pd.Timedelta(days=tol_days)
+        dmin = pd.to_datetime(df["date"].min())
+        dmax = pd.to_datetime(df["date"].max())
+        if s is not None and dmin > s + tol:
+            return False
+        if e is not None and dmax < e - tol:
+            return False
+        return True
+
     def run_full_pipeline(
         self,
         ticker_list: List[str],
@@ -116,6 +140,7 @@ class DataPipeline:
         indicator_list: List[str] = None,
         version: Optional[str] = 'v1.0',
         batch_size: int = 100,
+        prefer_db: bool = True,
     )-> Dict[str,pd.DataFrame]:
         """
         다음 단계 실행 (배치 처리)
@@ -180,6 +205,7 @@ class DataPipeline:
                 actions=actions,
                 update_if_exists=update_if_exists,
                 batch_size=batch_size,
+                prefer_db=prefer_db
             )
 
             # 가격 필터링
@@ -213,6 +239,7 @@ class DataPipeline:
                 interval=interval,
                 actions=actions,
                 update_if_exists=update_if_exists,
+                prefer_db=prefer_db
             )
 
             # 가격 데이터와 지표 데이터 병합
@@ -252,6 +279,7 @@ class DataPipeline:
             actions: bool = False,
             update_if_exists: bool = True,
             batch_size: int = 100,
+            prefer_db: bool = True,
     )-> Dict[str,pd.DataFrame]:
         """
         주식 종목 OHLCV데이터 불러오기 및 DB 저장 (배치 처리)
@@ -288,7 +316,33 @@ class DataPipeline:
                 logger.info(f"Period '{period}' converted to start_date={start_date}, end_date={end_date}")
 
             # ============ DB에 데이터 존재하는지 검증하는 로직. 존재하면 가져와서 반환 ===============
-    
+            requested_tickers = list(ticker_list)
+
+            if prefer_db and not update_if_exists:
+                db_price_dict = self.db_manager.load_price_data(
+                    ticker_codes=ticker_list,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+
+                missing_tickers = []
+                ok_count = 0
+                for ticker in ticker_list:
+                    df = db_price_dict.get(ticker)
+                    if self._coverage_ok(df, start_date, end_date):
+                        ok_count += 1
+                    else:
+                        missing_tickers.append(ticker)
+
+                if not missing_tickers:
+                    logger.info(f"✓ Price data loaded from DB for all tickers (n={ok_count})")
+                    return db_price_dict
+
+                logger.info(
+                    f"DB missing/incomplete price data for {len(missing_tickers)}/{len(ticker_list)} tickers. "
+                    f"Fetching only missing tickers..."
+                )
+                ticker_list = missing_tickers
             # ============ DB에 목표 데이터가 온전히 존재하지 않는다면, 밑의 fetch/save 작업 진행 ============
 
             # 전체 결과를 저장할 dict
@@ -377,7 +431,13 @@ class DataPipeline:
             logger.info(f"✓ Price pipeline completed successfully")
             logger.info(f"{'='*60}")
             logger.info("")
-
+            
+            if prefer_db and not update_if_exists:
+                return self.db_manager.load_price_data(
+                    ticker_codes=requested_tickers,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             return all_price_dict
 
         except Exception as e:
@@ -396,6 +456,7 @@ class DataPipeline:
         interval: str = "1d",
         actions: bool = False,
         update_if_exists: bool = True,
+        prefer_db: bool = True,
     )-> Dict[str,pd.DataFrame]:
         """
         db에서 가격 정보 불러와서 지표 계산 및 db에 지표 저장 (배치 처리)\n
@@ -428,7 +489,42 @@ class DataPipeline:
             self._validate_period_and_date(start_date=start_date, end_date=end_date, period=None)
 
             # ============ DB에 데이터 존재하는지 검증하는 로직. 존재하면 가져와서 반환 ===============
-    
+            requested_tickers = list(ticker_list)
+            
+            if prefer_db and not update_if_exists:
+                db_ind_dict = self.db_manager.load_indicators(
+                    ticker_codes=ticker_list,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+
+                missing_tickers = []
+                ok_count = 0
+                required_cols = set(["date"] + (indicator_list or []))
+
+                for ticker in ticker_list:
+                    df = db_ind_dict.get(ticker)
+                    if not self._coverage_ok(df, start_date, end_date):
+                        missing_tickers.append(ticker)
+                        continue
+                    if df is None or df.empty:
+                        missing_tickers.append(ticker)
+                        continue
+                    if not required_cols.issubset(set(df.columns)): #required_cols가 set(df.columns)의 하위집합인지
+                        missing_tickers.append(ticker)
+                        continue
+                    ok_count += 1
+
+                if not missing_tickers:
+                    logger.info(f"✓ Indicator data loaded from DB for all tickers (n={ok_count})")
+                    return db_ind_dict
+
+                logger.info(
+                    f"DB missing/incomplete indicator data for {len(missing_tickers)}/{len(ticker_list)} tickers. "
+                    f"Calculating only missing tickers..."
+                )
+                ticker_list = missing_tickers
+
             # ============ DB에 목표 데이터가 온전히 존재하지 않는다면, 밑의 load/calculate/save 작업 진행 ============
 
             # ============ Pre-processing: Lookback 계산 및 적용 (안전 마진 포함) ============
@@ -446,6 +542,7 @@ class DataPipeline:
                 actions=actions,
                 update_if_exists=update_if_exists,
                 batch_size=batch_size,
+                prefer_db=prefer_db,
             )
             logger.info(f"Loaded {len(price_dict)} tickers")
             results['step1_load_data'] = {
@@ -581,7 +678,13 @@ class DataPipeline:
             logger.info(f"✓ Indicator pipeline completed successfully")
             logger.info(f"{'='*60}")
             logger.info("")
-
+            
+            if prefer_db and not update_if_exists:
+                return self.db_manager.load_indicators(
+                    ticker_codes=requested_tickers,
+                    start_date=original_start_date,
+                    end_date=end_date,
+                )
             return all_calculated_dict
 
         except Exception as e:
