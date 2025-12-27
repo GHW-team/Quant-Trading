@@ -31,9 +31,10 @@ def main():
     database_path = config['data']['database_path']
 
     # model.training 설정
-    tickers = TickerUniverse().get(['KOSPI'])[:50]
-    #임시
-    #config['model']['training']['tickers']
+    tickers = config['model']['training']['tickers']
+    if not tickers:
+        tickers = TickerUniverse().get(['KOSPI'])[:50]
+
     period = config['model']['training'].get('period')
     start_date = config['model']['training'].get('start_date')
     end_date = config['model']['training'].get('end_date')
@@ -82,6 +83,8 @@ def main():
                 start_date=start_date,
                 end_date=end_date,
                 period=period,
+                prefer_db=True,
+                update_if_exists=False,
             )
             
 
