@@ -109,23 +109,148 @@ class DataPipeline:
             return None
         return pd.to_datetime(date_like)
 
-    def _coverage_ok(self, df: pd.DataFrame, start_date: Optional[str], end_date: Optional[str], tol_days: int = 7) -> bool:
-        """DB에서 불러온 데이터가 요청 구간을 '대략' 커버하는지 검사한다.
+    def _coverage_ok(
+        self,
+        df: pd.DataFrame,
+        start_date: Optional[str],
+        end_date: Optional[str],
+        tol_days: int = 7,
+        *,
+        ticker_code: Optional[str] = None,
+        check_gaps: bool = True,
+        # 아래 3개가 "중간 공백 허용치" (기본=0이면 1개라도 비면 False)
+        max_missing_trading_days: int = 0,
+        max_missing_ratio: float = 0.0,
+        # 캘린더를 못 쓰는 경우(예외/라이브러리 문제) fallback: 날짜 간격이 이 값보다 크면 gap으로 판단
+        max_gap_days_fallback: int = 10,
+        # 상장폐지/가격정지의 경우(누락 데이터 시작부터 끝 커버리지까지의 경우)
+        allow_early_end: bool = True,
+    ) -> bool:
+        """DB에서 불러온 데이터가 요청 구간을 커버하는지 검사한다.
 
-        - 주말/휴일로 인해 start/end와 정확히 일치하지 않을 수 있어 tol_days(기본 7일) 허용
-        - 엄밀한 거래일 캘린더를 쓰지 않고, 최소/최대 날짜 기반으로 간단히 판단
+        기존: min/max 날짜만 확인
+        확장: (가능하면) 거래일 캘린더 기반으로 중간 누락(날짜 row 누락)까지 검사
+
+        - tol_days: start/end는 주말/휴일로 인해 +-tol_days 오차 허용
+        - check_gaps=True면 중간 거래일 누락도 검사
+        - 기본 설정(누락 허용 0): 중간에 거래일이 1개라도 빠지면 False
         """
+
+        # ---------- 기본 유효성 ----------
         if df is None or df.empty or "date" not in df.columns:
             return False
+
+        # date 정리
+        d = pd.to_datetime(df["date"], errors="coerce")
+        d = d.dropna()
+        if d.empty:
+            return False
+
         s = self._to_datetime_safe(start_date)
         e = self._to_datetime_safe(end_date)
         tol = pd.Timedelta(days=tol_days)
-        dmin = pd.to_datetime(df["date"].min())
-        dmax = pd.to_datetime(df["date"].max())
+
+        dmin = d.min()
+        dmax = d.max()
+
+        # ---------- 1) 시작 커버리지 ----------
         if s is not None and dmin > s + tol:
             return False
-        if e is not None and dmax < e - tol:
+        if s is not None and dmax < s - tol:
             return False
+        
+        # 끝 커버리지: early-end 허용이면 '실패'시키지 말고 검사 구간을 dmax로 축소
+        effective_end = e
+        if e is not None and dmax < e - tol:
+            if not allow_early_end:
+                return False
+            effective_end = dmax
+
+        # gap 검사 안 하면 여기서 끝
+        if not check_gaps:
+            return True
+
+        # 검사 구간(요청 구간이 없으면 df 구간 사용)
+        rs = s if s is not None else dmin
+        re_ = effective_end if effective_end is not None else dmax
+
+        # ---------- 2) "가격 데이터"면 NaN row도 누락으로 취급 (지표는 초반 NaN이 정상이라 제외) ----------
+        price_cols = [c for c in ["open", "high", "low", "close", "volume", "adj_close"] if c in df.columns]
+        nan_like_missing_dates = pd.DatetimeIndex([])
+        if price_cols:
+            mask_all_nan = df[price_cols].isna().all(axis=1)
+            if mask_all_nan.any():
+                nan_dates = pd.to_datetime(df.loc[mask_all_nan, "date"], errors="coerce").dropna()
+                if not nan_dates.empty:
+                    nan_like_missing_dates = pd.DatetimeIndex(nan_dates)
+
+        # ---------- 3) 거래일 캘린더 기반 gap 체크 (가능하면) ----------
+        try:
+            import exchange_calendars as xcals
+
+            exchange_code = None
+            if ticker_code:
+                # data_fetcher.py에 있는 추론 로직 재사용 (.KS/.KQ -> XKRX 등)
+                exchange_code = self.fetcher._get_exchange_code(ticker_code)
+
+            cal = None
+            if exchange_code:
+                cal = self.fetcher.calendar_cache.get(exchange_code)
+                if cal is None:
+                    cal = xcals.get_calendar(exchange_code)
+                    self.fetcher.calendar_cache[exchange_code] = cal
+
+            if cal is not None:
+                expected = cal.sessions_in_range(rs, re_)
+                if expected.tz is not None:
+                    expected = expected.tz_localize(None)
+
+                # 수동 휴장일 제외(프로젝트에서 쓰는 것과 동일)
+                if hasattr(self.fetcher, "custom_holidays") and exchange_code in self.fetcher.custom_holidays:
+                    custom = pd.DatetimeIndex(self.fetcher.custom_holidays[exchange_code])
+                    if custom.tz is not None:
+                        custom = custom.tz_localize(None)
+                    expected = expected.difference(custom)
+
+                # 실제 날짜 집합
+                actual = pd.DatetimeIndex(pd.to_datetime(df["date"], errors="coerce").dropna().unique())
+                if actual.tz is not None:
+                    actual = actual.tz_localize(None)
+
+                missing = expected.difference(actual)
+
+                # 가격데이터면 "row는 있는데 전부 NaN"도 사실상 누락으로 합침
+                if not nan_like_missing_dates.empty:
+                    if nan_like_missing_dates.tz is not None:
+                        nan_like_missing_dates = nan_like_missing_dates.tz_localize(None)
+                    missing = missing.union(nan_like_missing_dates.intersection(expected))
+
+                total = len(expected)
+                miss_n = len(missing)
+                miss_ratio = (miss_n / total) if total > 0 else 0.0
+
+                # 누락 허용치 판단 (기본=0이면 1개라도 누락이면 False)
+                if miss_n > max_missing_trading_days:
+                    return False
+                if miss_ratio > max_missing_ratio:
+                    return False
+
+                return True
+
+        except Exception:
+            # 캘린더 로딩 실패/라이브러리 문제면 fallback로 내려감
+            pass
+
+        # ---------- 4) fallback: 연속 날짜 간격이 너무 크면 gap으로 판단 ----------
+        dd = pd.Series(pd.to_datetime(df["date"], errors="coerce").dropna().sort_values().unique())
+        if len(dd) < 2:
+            return True
+
+        max_gap = (dd.diff().dt.days.max())
+        if pd.notna(max_gap) and max_gap > max_gap_days_fallback:
+            return False
+
+        # fallback에서는 NaN row까지는 강하게 판단하지 않고(오탐 방지), 필요하면 여기서 추가로 확장 가능
         return True
 
     def run_full_pipeline(
@@ -329,7 +454,7 @@ class DataPipeline:
                 ok_count = 0
                 for ticker in ticker_list:
                     df = db_price_dict.get(ticker)
-                    if self._coverage_ok(df, start_date, end_date):
+                    if self._coverage_ok(df, start_date, end_date, ticker_code=ticker):
                         ok_count += 1
                     else:
                         missing_tickers.append(ticker)
@@ -504,7 +629,7 @@ class DataPipeline:
 
                 for ticker in ticker_list:
                     df = db_ind_dict.get(ticker)
-                    if not self._coverage_ok(df, start_date, end_date):
+                    if not self._coverage_ok(df, start_date, end_date, ticker_code=ticker):
                         missing_tickers.append(ticker)
                         continue
                     if df is None or df.empty:
