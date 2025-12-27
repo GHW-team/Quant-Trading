@@ -2,16 +2,29 @@
 
 from sqlalchemy import (Column,Integer,String,
                         Date,Float,DateTime,ForeignKey,
-                        UniqueConstraint, Index, create_engine)
+                        UniqueConstraint, Index, create_engine,
+                        event)
 from sqlalchemy.orm import relationship 
 from datetime import datetime, timezone  
 from pathlib import Path
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.engine import Engine
 
 Base = declarative_base()
 
 def get_utc_now():
     return datetime.now(timezone.utc)
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    try:
+        import sqlite3
+        if isinstance(dbapi_connection, sqlite3.Connection):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+    except Exception:
+        pass
 
 class Ticker(Base):
     __tablename__ = 'tickers'
