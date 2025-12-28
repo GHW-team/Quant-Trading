@@ -531,8 +531,8 @@ class DataPipeline:
                                 
                             # 결과에 추가
                             filtered_indicator_dict[ticker] = filtered_df
-                    
-                    filtered_success_rate = (len(batch_calculated_dict) / len(filtered_indicator_dict)) * 100
+
+                    filtered_success_rate = (len(filtered_indicator_dict) / len(batch_calculated_dict)) * 100 if batch_calculated_dict else 0
                     logger.info(f"Filtering Complete. Success rate: {filtered_success_rate:.2f} %")
 
                     if filtered_indicator_dict:
