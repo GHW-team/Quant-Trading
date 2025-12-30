@@ -81,18 +81,18 @@ class IndicatorCalculator:
         'ma_100': lambda df : IndicatorCalculator._calc_ema(df,100),
         'ma_120' : lambda df : IndicatorCalculator._calc_ema(df,120),
         'ma_200' : lambda df : IndicatorCalculator._calc_ema(df,200),
-        'macd' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,0],
-        'macd_signal' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,1],
-        'macd_hist' : lambda df : IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9).iloc[:,2],
+        'macd' : lambda df : None if (result := IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9)) is None else result.iloc[:,0],
+        'macd_signal' : lambda df : None if (result := IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9)) is None else result.iloc[:,1],
+        'macd_hist' : lambda df : None if (result := IndicatorCalculator._calc_macd(df,fast=12,slow=26,signal=9)) is None else result.iloc[:,2],
         'rsi' : lambda df : IndicatorCalculator._calc_rsi(df,14),
-        'bb_upper': lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 0],
-        'bb_mid':   lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 1],
-        'bb_lower': lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 2],
-        'bb_pct':   lambda df: IndicatorCalculator._calc_bbands(df, length=20, std=2).iloc[:, 3],
+        'bb_upper': lambda df: None if (result := IndicatorCalculator._calc_bbands(df, length=20, std=2)) is None else result.iloc[:, 0],
+        'bb_mid':   lambda df: None if (result := IndicatorCalculator._calc_bbands(df, length=20, std=2)) is None else result.iloc[:, 1],
+        'bb_lower': lambda df: None if (result := IndicatorCalculator._calc_bbands(df, length=20, std=2)) is None else result.iloc[:, 2],
+        'bb_pct':   lambda df: None if (result := IndicatorCalculator._calc_bbands(df, length=20, std=2)) is None else result.iloc[:, 3],
         'atr':  lambda df: IndicatorCalculator._calc_atr(df, 14),
         "hv":   lambda df: IndicatorCalculator._calc_hv(df, 20, 252),
-        'stoch_k': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 0],
-        'stoch_d': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 1],
+        'stoch_k': lambda df: None if (result := IndicatorCalculator._calc_stoch(df, 14, 3)) is None else result.iloc[:, 0],
+        'stoch_d': lambda df: None if (result := IndicatorCalculator._calc_stoch(df, 14, 3)) is None else result.iloc[:, 1],
         'obv':     lambda df: IndicatorCalculator._calc_obv(df)
     }
 
@@ -215,7 +215,7 @@ class IndicatorCalculator:
                 lookback = self.get_lookback_days([indicator])
                 if len(df) < lookback:
                     logger.warning(
-                        f"Insufficient data for {indicator}: need {lookback} rows (warmup), "
+                        f"Insufficient data for {indicator}: need {lookback} rows (warmup)"
                     )
 
                 # Calculate indicator

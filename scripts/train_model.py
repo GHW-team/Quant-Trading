@@ -114,6 +114,7 @@ def main():
     # (1) NaN 제거: Feature나 Label이 없는 행은 학습 불가
     # ModelHandler에게 깨끗한 데이터를 주기 위한 필수 과정
     clean_data = df_labeled.dropna(subset=FEATURE_COLUMNS + ['label'])
+    clean_data = clean_data[clean_data['volume']>0]
 
     if clean_data.empty:
         logger.error("❌ 유효한 데이터가 없습니다 (모두 NaN). 기간을 늘려보세요.")

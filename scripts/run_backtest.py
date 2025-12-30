@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import numpy as np
 import yaml
 import joblib
 
@@ -98,26 +99,43 @@ def generate_ml_signals(
             df = df_dict[ticker]
 
             # ML 입력값 선택
-            X = df[feature_columns]
+            X = df[feature_columns].copy()
 
-            # NaN 검사
-            if X.isnull().any().any():
-                nan_count = X.isnull().sum().sum()
-                nan_cols = X.isnull().any()
-                nan_cols = nan_cols[nan_cols].index.tolist()
-                raise ValueError(f"{ticker}: NaN 발견 (총 {nan_count}개, 컬럼: {nan_cols})")
+            # volume = 0 인 행은 신호를 NaN으로 설정
+            volume_zero_mask = (df['volume']== 0)
 
-            # 예측
-            predictions = handler.predict(X,threshold = 0.57)
+            # NaN 이 있는 행은 신호를 NaN으로 설정
+            nan_mask = X.isnull().any(axis=1)
             
-            # 신호 시리즈 생성
+            # 예측 가능한 행만 선택
+            valid_mask = ~(volume_zero_mask | nan_mask)
+            X_valid = X[valid_mask]
+
+            # 전체 인덱스에 대한 신호 시리즈 생성 (기본값 NaN)
             signal_series = pd.Series(
-                predictions,
+                np.nan,
                 index=pd.to_datetime(df['date']),
                 name='signal'
             )
-            
+
+            # 예측 가능한 행이 있는 경우에만 예측 수행
+            if len(X_valid) > 0:
+                # 예측
+                predictions = handler.predict(X_valid, threshold=0.57)
+
+                # 예측 가능한 행에만 예측값 할당
+                valid_dates = df.loc[valid_mask, 'date']
+                signal_series.loc[valid_dates] = predictions
+            else:
+                # 예측 가능한 행이 0개인 경우 - 모든 행이 NaN (이미 기본값)
+                logger.warning(f"{ticker}: 예측 가능한 행이 0개 - 모든 signal=NaN")
+
             signals[ticker] = signal_series
+
+            # NaN 로깅
+            nan_count = signal_series.isna().sum()
+            if nan_count > 0:
+                logger.info(f"{ticker}: {nan_count}개 행에 signal=NaN (volume=0 또는 feature NaN)")
             
             # 통계 출력
             buy_signals = (signal_series == 1).sum()
@@ -151,11 +169,7 @@ def main():
     data_config = config['data']
 
     db_path = data_config['db_path']
-    ticker_codes = TickerUniverse().get(['KOSPI'])[:50]
-
-    # 임시: 데이터 부족한 종목 제외
-    #exclude_tickers = ['499790.KS', '017860.KS']
-    #ticker_codes = [t for t in ticker_codes if t not in exclude_tickers]
+    ticker_codes = TickerUniverse().get(['KOSPI'])
 
     #임시
     #data_config['ticker_codes']
@@ -199,6 +213,7 @@ def main():
             end_date=end_date,
             indicator_list=indicator_list,
         )
+        ticker_codes = list(df_dict.keys())
 
         # ============ ML 신호 생성 ============
         signals = None
@@ -223,20 +238,16 @@ def main():
         updated_df_dict = {}
 
         for ticker in ticker_codes:
-            #임시
-            # df_dict에 없는 티커는 건너뛰기 (데이터가 없는 경우)
+            # df_dict에 없는 티커는 오류 발생
             if ticker not in df_dict:
-                logger.warning(f"{ticker}: df_dict에 없어 건너뜁니다")
-                continue
+                raise ValueError(f"{ticker}: df_dict에 없습니다")
 
             df = df_dict[ticker]
             signal = signals.get(ticker)
 
-            #임시
-            # 신호가 없는 티커는 건너뛰기 (백테스트에서 제외)
+            # 신호가 없는 티커는 오류 발생
             if signal is None:
-                logger.warning(f"{ticker}: 신호가 없어 백테스트에서 제외합니다")
-                continue
+                raise ValueError(f"{ticker}: 신호가 없습니다")
 
             # signal은 DatetimeIndex를 가진 Series
             # df는 'date' 컬럼을 가진 DataFrame
@@ -250,9 +261,6 @@ def main():
 
             # 병합 (left join - df의 모든 날짜 유지)
             df = pd.merge(df, signal_df, on='date', how='left')
-
-            # NaN이 있으면 0으로 채우기 (신호가 없는 날은 매수하지 않음)
-            df['signal'] = df['signal'].fillna(0)
 
             # 업데이트된 df_dict에 저장
             updated_df_dict[ticker] = df

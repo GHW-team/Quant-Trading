@@ -4,6 +4,7 @@
 import logging
 from collections import defaultdict
 from typing import Dict, List, Optional
+import numpy as np
 
 import backtrader as bt
 
@@ -176,6 +177,10 @@ class MLSignalStrategy(bt.Strategy):
             # ML 매수 신호 확인
             signal = 0
             signal = data.lines.signal[0]
+
+            # 거래량 불러오기
+            volume = 0
+            volume = data.lines.volume[0]
             
             # 보유일 증가
             if pos.size > 0:
@@ -187,6 +192,12 @@ class MLSignalStrategy(bt.Strategy):
             
             # ============ 매도 로직 ============
             if pos.size > 0:
+                sellable = True
+                # 매도 판단 불가 시 
+                if volume == 0:
+                    # 거래량이 0 인 경우
+                    sellable = False
+
                 should_sell = False
                 sell_reason = ""
                 
@@ -221,7 +232,7 @@ class MLSignalStrategy(bt.Strategy):
                         should_sell = True
                         sell_reason = f"TAKE_PROFIT({profit_pct:.2%})"
                 
-                if should_sell:
+                if should_sell and sellable:
                     #self.log(f'{data_name} SELL ORDER | Reason: {sell_reason}')
                     size_to_sell = self.getposition(data).size
                     self.orders[data_name] = self.sell(data=data, size=size_to_sell)
@@ -229,11 +240,17 @@ class MLSignalStrategy(bt.Strategy):
             
             # ============ 매수 로직 ============
             if pos.size == 0:
+                # 매수 가능한 상태인지 검사
+                buyable = True
+                if volume == 0:
+                    # 거래량이 0 인 경우
+                    buyable = False
+
                 # 최대 포지션 제한 체크
                 if self.params.max_positions and current_positions >= self.params.max_positions:
                     continue
 
-                if signal == 1:
+                if signal == 1 and buyable:
                     # 동일 비중으로 매수 금액 계산
                     cash = self.broker.getcash()
                     target_value = self.broker.getvalue() * self.weight
@@ -252,6 +269,8 @@ class MLSignalStrategy(bt.Strategy):
                             current_positions += 1
                 elif signal == 0:
                     continue
+                elif np.isnan(signal):
+                    continue
                 else:
                     current_date = data.datetime.date(0)
                     raise ValueError(
@@ -260,7 +279,7 @@ class MLSignalStrategy(bt.Strategy):
                         f"----------------------------------------\n"
                         f"📅 날짜: {current_date}\n"
                         f"📈 종목: {data_name}\n"
-                        f"❌ 값  : {signal} (기대값: 0 또는 1)\n"
+                        f"❌ 값  : {signal} (기대값: 0 / 1 / np.NaN)\n"
                         f"{'='*60}"
                     )
     

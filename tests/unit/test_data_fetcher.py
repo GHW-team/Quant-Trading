@@ -171,10 +171,10 @@ class TestValidateAndFillGaps:
         assert 'date' in result.columns
 
         #누락된 날짜 채워졌는지 확인
-        assert pd.isna(result['adj_close'].iloc[1])
-        assert pd.isna(result['volume'].iloc[1])
-        assert pd.isna(result['adj_close'].iloc[2])
-        assert pd.isna(result['volume'].iloc[2])
+        assert not pd.isna(result['adj_close'].iloc[1])
+        assert result['volume'].iloc[1] == 0 
+        assert not pd.isna(result['adj_close'].iloc[2])
+        assert result['volume'].iloc[2] == 0
 
         assert result['date'].iloc[1] == pd.Timestamp('2020-01-02')
         assert result['date'].iloc[2] == pd.Timestamp('2020-01-03')
@@ -528,7 +528,15 @@ class TestStockDataFetcherMultipleByDate:
 
         def mock_fetch(ticker, start_date, end_date, interval='1d', actions=False):
             time.sleep(0.1)  # 각 호출마다 100ms 지연
-            return pd.DataFrame({'date': pd.to_datetime(['2020-01-01']), 'close': [100]})
+            return pd.DataFrame({
+                'date': pd.to_datetime(['2020-01-01']),
+                'open': [100],
+                'high': [101],
+                'low': [99],
+                'close': [100],
+                'adj_close': [100],
+                'volume': [1000000]
+            })
 
         with patch.object(StockDataFetcher, '_fetch_single_by_date', side_effect=mock_fetch):
             fetcher = StockDataFetcher(max_workers=2)
@@ -565,7 +573,15 @@ class TestStockDataFetcherMultipleByDate:
         with patch.object(StockDataFetcher, '_fetch_single_by_date') as mock:
             mock.side_effect = [
                 None,
-                pd.DataFrame({'date': pd.to_datetime(['2020-01-01']), 'close': [100]}),
+                pd.DataFrame({
+                    'date': pd.to_datetime(['2020-01-01']),
+                    'open': [100],
+                    'high': [101],
+                    'low': [99],
+                    'close': [100],
+                    'adj_close': [100],
+                    'volume': [1000000]
+                }),
             ]
 
             fetcher = StockDataFetcher(max_workers=2)
@@ -585,7 +601,15 @@ class TestStockDataFetcherMultipleByDate:
         with patch.object(StockDataFetcher, '_fetch_single_by_date') as mock:
             mock.side_effect = [
                 RuntimeError("Thread exception"),
-                pd.DataFrame({'date': pd.to_datetime(['2020-01-01']), 'close': [100]}),
+                pd.DataFrame({
+                    'date': pd.to_datetime(['2020-01-01']),
+                    'open': [100],
+                    'high': [101],
+                    'low': [99],
+                    'close': [100],
+                    'adj_close': [100],
+                    'volume': [1000000]
+                }),
                 RuntimeError("Thread exception"),
             ]
 

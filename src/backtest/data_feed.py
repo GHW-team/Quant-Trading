@@ -128,7 +128,7 @@ def create_feeds_from_dataframe(
             feed = DatabaseFeed(**feed_params)
             feeds[ticker] = feed
             
-            logger.info(f"{ticker}: Created feed with {len(df)} records")
+            logger.debug(f"{ticker}: Created feed with {len(df)} records")
             
         except Exception as e:
             logger.error(f"{ticker}: Failed to create feed - {e}")

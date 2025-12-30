@@ -240,6 +240,8 @@ class StockDataFetcher:
 
                     # 누락된 날짜 채우기
                     df = df.reindex(date_list)
+                    df['volume'] = df['volume'].fillna(0)
+                    df = df.ffill()
                     df.index.name = 'date'
 
                 # tz 복원
@@ -261,7 +263,7 @@ class StockDataFetcher:
     # 단일 수집
     # ------------------------------------------------------------------ #
     @sleep_and_retry
-    @limits(calls=5, period=1)
+    @limits(calls=20, period=1)
     def _fetch_single_by_date(
         self,
         ticker: str,

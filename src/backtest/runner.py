@@ -130,7 +130,7 @@ class BacktestRunner:
         
         for ticker, feed in feeds.items():
             self.cerebro.adddata(feed, name=ticker)
-            logger.info(f"  ✓ {ticker} 데이터 추가")
+            logger.debug(f"  ✓ {ticker} 데이터 추가")
         
         # ============ 3. 전략 추가 ============
         self.cerebro.addstrategy(strategy_class, **strategy_params)

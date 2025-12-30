@@ -218,11 +218,23 @@ class DataPipeline:
             # 가격 데이터와 지표 데이터 병합
             merged_dict = {}
             for ticker in ticker_list:
-                price_df = all_price_dict.get(ticker)
+                price_df = filtered_price_dict.get(ticker)
                 indicator_df = all_calculated_dict.get(ticker)
 
                 if price_df is not None and indicator_df is not None:
-                    merged_df = pd.merge(price_df, indicator_df, how="inner", on="date")
+                    # indicator_df에서 OHLCV 컬럼 제거 (indicator 컬럼만 남김)
+                    ohlcv_cols = ['open', 'high', 'low', 'close', 'adj_close', 'volume']
+                    indicator_cols = [col for col in indicator_df.columns if col not in ohlcv_cols]
+                    indicator_df_clean = indicator_df[indicator_cols]
+
+                    # timezone 제거 (있는 경우에만)
+                    if price_df['date'].dt.tz is not None:
+                        price_df['date'] = price_df['date'].dt.tz_localize(None)
+                    if indicator_df_clean['date'].dt.tz is not None:
+                        indicator_df_clean['date'] = indicator_df_clean['date'].dt.tz_localize(None)
+                    
+                    # price 와 indicator 병합
+                    merged_df = pd.merge(price_df, indicator_df_clean, how="inner", on="date")
                     merged_dict[ticker] = merged_df
                 else:
                     logger.info(f"{ticker}: excluded from final result. Missing data exist")
@@ -437,15 +449,22 @@ class DataPipeline:
 
             # ============ Price 데이터 불러오기 =============
             logger.info(f"____Loading price data...____")
-            price_dict =  self.run_price_pipeline(
-                ticker_list=ticker_list,
+            #price_dict =  self.run_price_pipeline(
+            #    ticker_list=ticker_list,
+            #    start_date=start_date,
+            #    end_date=end_date,
+            #    period=period,
+            #    interval=interval,
+            #    actions=actions,
+            #    update_if_exists=update_if_exists,
+            #    batch_size=batch_size,
+            #)
+
+            #임시
+            price_dict = self.db_manager.load_price_data(
+                ticker_codes=ticker_list,
                 start_date=start_date,
                 end_date=end_date,
-                period=period,
-                interval=interval,
-                actions=actions,
-                update_if_exists=update_if_exists,
-                batch_size=batch_size,
             )
             logger.info(f"Loaded {len(price_dict)} tickers")
             results['step1_load_data'] = {
