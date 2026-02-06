@@ -11,19 +11,47 @@ data:
 
   # 다운로드할 종목 리스트
   tickers:
-    # - "005930.KS"    # 삼성전자
-    # - "000660.KS"    # SK하이닉스
-    # - "051910.KS"    # LG화학
-    # - "207940.KS"    # SM Entertainment
+   - SPY
+   - QQQ
+   - DJI
+   - XLE
+   - XLK
+   - XLF
+   - XLV
+   - XLI
+   - XLP
+   - XLY
+   - XLU
+   - XLB
+   - XLC
+   - XLRE
+   - XSD
+   - XHB
+   - XSD
+   - XOP
+   - KRE
+   - XME
+   - XBI
+   - XAR
+   - XRT
+   - GLD
+   - TLT
+   - SLV
+   - PPLT
+   - USO
+   - UNG
+   - DBA
+   - SOYB
+   - WEAT
+   - CORN
   exchanges:
   #상장 인덱스
-    - "KOSPI"
-  #  - "S&P500"
+
 
   # 데이터 기간 설정 (period 또는 start_date/end_date 중 하나)
   period:                               # null - start_date/end_date 사용
-  start_date: "2020-01-01"              # 다운로드 시작일
-  end_date: "2023-12-31"                # 다운로드 종료일
+  start_date: "2026-01-01"              # 다운로드 시작일
+  end_date: end_date                # 다운로드 종료일
 
   # 데이터 옵션
   update_if_exists: true                # DB 데이터 업데이트 여부

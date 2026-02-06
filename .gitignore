@@ -219,6 +219,7 @@ docker-compose.override.yml
 # 백테스팅 결과 (선택사항 - 히스토리 남기려면 주석 처리)
 # backtest_results/
 # reports/
+data/backtest/
 
 # 임시 파일
 *.tmp

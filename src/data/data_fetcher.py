@@ -381,8 +381,11 @@ class StockDataFetcher:
                     logger.error("%s: Exception in thread: %s", ticker, exc)
 
 
-        # 시장 거래일의 데이터가 모두 존재하는지 검증 및 채우기
-        results = self._validate_and_fill_gaps(start_date, end_date, results)
+        # 시장 거래일의 데이터가 모두 존재하는지 검증 및 채우기 (일봉만 적용)
+        if interval == "1d":
+            results = self._validate_and_fill_gaps(start_date, end_date, results)
+        else:
+            logger.info("Skipping trading-day gap validation for interval=%s", interval)
 
         failed_tickers = set(ticker_list) - set(results.keys())
         success_rate = len(results) / len(ticker_list) * 100 if ticker_list else 0
