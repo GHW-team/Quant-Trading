@@ -183,6 +183,7 @@ __marimo__/
 data/database/*.db
 data/raw/*.csv
 data/processed/*.csv
+data/*
 *.parquet
 *.feather
 
