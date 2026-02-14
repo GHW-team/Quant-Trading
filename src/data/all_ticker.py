@@ -107,7 +107,27 @@ class TickerUniverse:
         return symbols
 
     def _load_sp500(self) -> List[str]:
-        """S&P500 구성 종목 로드 (변경 사항)."""
+        """S&P500 구성 종목 로드 (Wikipedia 직접 스크래핑 + FDR fallback)."""
+        import pandas as pd
+        
+        # 방법 1: Wikipedia에서 직접 스크래핑 (User-Agent 설정으로 403 방지)
+        try:
+            import urllib.request
+            url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            html = urllib.request.urlopen(req).read().decode('utf-8')
+            tables = pd.read_html(html)
+            df = tables[0]
+            # BRK.B → BRK-B (yfinance 형식)
+            tickers = df['Symbol'].str.replace('.', '-', regex=False).tolist()
+            logger.info("S&P500 Wikipedia 스크래핑 성공: %d개 종목", len(tickers))
+            return [str(sym).strip() for sym in tickers if str(sym).strip()]
+        except Exception as e:
+            logger.warning("Wikipedia 스크래핑 실패: %s, FDR로 시도합니다", e)
+        
+        # 방법 2: FinanceDataReader (기존 방식, fallback)
         df = fdr.StockListing("S&P500")
         if df.empty or "Symbol" not in df.columns:
             logger.warning("S&P500 listing is empty or missing Symbol column")

@@ -93,7 +93,8 @@ class IndicatorCalculator:
         "hv":   lambda df: IndicatorCalculator._calc_hv(df, 20, 252),
         'stoch_k': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 0],
         'stoch_d': lambda df: IndicatorCalculator._calc_stoch(df, 14, 3).iloc[:, 1],
-        'obv':     lambda df: IndicatorCalculator._calc_obv(df)
+        'obv':     lambda df: IndicatorCalculator._calc_obv(df),
+        'adx':     lambda df: IndicatorCalculator._calc_adx(df, 14)
     }
 
     def __init__(self):
@@ -136,7 +137,8 @@ class IndicatorCalculator:
             'hv' : 21,               #HV 기본값 
             'stoch_k' : 16,          #스토캐스틱 기본값: k=14,d=3
             'stoch_d' : 18,          #D는 k의 3일 이동평균이므로 룩백기간은 k와 동일해야 함.
-            'obv' : 1
+            'obv' : 1,
+            'adx': 28,  # ADX는 내부적으로 2*length 정도 필요
         }
 
         # 요청한 지표 중 최대 lookback 일수 구하기
@@ -259,3 +261,14 @@ class IndicatorCalculator:
                 f"Invalid indicators: {invalid}\n"
                 f"Available: {available}"
             )
+
+    @staticmethod
+    def _calc_adx(df: pd.DataFrame, length: int) -> pd.Series:
+        """ADX(Average Directional Index) 계산 - 추세 강도 측정"""
+        adj_factor = df['adj_close'] / df['close']
+        adj_high = df['high'] * adj_factor
+        adj_low = df['low'] * adj_factor
+    
+        adx_df = ta.adx(adj_high, adj_low, df['adj_close'], length=length)
+        # pandas-ta는 ADX_14, DMP_14, DMN_14 컬럼을 반환
+        return adx_df[f'ADX_{length}']

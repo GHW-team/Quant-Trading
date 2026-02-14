@@ -22,7 +22,7 @@ class DatabaseManager:
         'ma_5', 'ma_10', 'ma_20', 'ma_50', 'ma_60', 'ma_100', 'ma_120', 'ma_200',
         'macd', 'macd_hist', 'macd_signal',
         'rsi', 'bb_upper', 'bb_mid', 'bb_lower', 'bb_pct',
-        'atr', 'hv', 'stoch_k', 'stoch_d', 'obv'
+        'atr', 'hv', 'stoch_k', 'stoch_d', 'obv', 'adx'
     ]
 
     def __init__(self, db_path: str = "data/database/stocks.db"):
