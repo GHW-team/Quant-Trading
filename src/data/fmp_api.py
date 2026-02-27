@@ -435,3 +435,92 @@ def company_profile_data_ticker(ticker_list: List[str]) -> Dict[str, Optional[pd
         return fmp_download_parallel(tasks)
     except Exception as e:
         print(e)
+
+
+
+#========================================#
+###       6. 시장 지수 / 무위험 수익률       ###
+#========================================#
+
+def market_index_price_data(ticker_list: List[str], start_date: str, end_date: str) -> None:
+    """
+    시장 proxy(SPY 등 ETF/Index) 가격 데이터 다운로드.
+    price_data_ticker 와 동일한 엔드포인트 사용 (historical-price-eod/full).
+    저장 위치: /app/data/fmp/price/ticker/{ticker}_{start}_to_{end}.json
+
+    사용 예)
+        market_index_price_data(["SPY"], "2000-01-01", "2026-02-25")
+    """
+    price_data_ticker(ticker_list, start_date, end_date)
+
+TREASURY_CHUNK_DAYS = 89  # API 최대 90-day range → 1일 여유
+
+def treasury_rates_data(start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+    """
+    미국 국채 금리 데이터 다운로드 (FMP treasury-rates 엔드포인트).
+    API 최대 90일 제한으로 청크 분할 후 통합 저장.
+
+    저장 위치: /app/data/fmp/treasury/treasury_{start}_to_{end}.json
+
+    응답 컬럼: date, month1, month2, month3, month6,
+               year1, year2, year3, year5, year7, year10, year20, year30
+
+    무위험 수익률 기준 → year3(3개월물) 또는 month3(3개월물) 권장.
+
+    사용 예)
+        treasury_rates_data("2000-01-01", "2026-02-25")
+    """
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt   = datetime.strptime(end_date,   '%Y-%m-%d')
+
+    final_path = os.path.join(DOWNLOAD_FOLDER, f"treasury/treasury_{start_date}_to_{end_date}.json")
+    os.makedirs(os.path.dirname(final_path), exist_ok=True)
+
+    # 이미 존재하면 캐시 반환
+    if os.path.exists(final_path):
+        print(f"✅ [Cache Hit] : {final_path}")
+        return pd.read_json(final_path)
+
+    # 청크 목록 생성
+    chunks = []
+    chunk_start = start_dt
+    while chunk_start <= end_dt:
+        chunk_end = min(chunk_start + timedelta(days=TREASURY_CHUNK_DAYS), end_dt)
+        chunks.append((chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
+        chunk_start = chunk_end + timedelta(days=1)
+
+    os.makedirs(os.path.join(DOWNLOAD_FOLDER, "treasury"), exist_ok=True)
+
+    def _download_chunk(cs: str, ce: str) -> Optional[pd.DataFrame]:
+        url      = f"{BASE_URL}/treasury-rates?from={cs}&to={ce}&apikey={API_KEY}"
+        tmp_path = os.path.join(DOWNLOAD_FOLDER, f"treasury/_tmp_{cs}_to_{ce}.json")
+        df = fmp_down_save(url, tmp_path)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        return df
+
+    # 청크 병렬 다운로드
+    results: Dict[str, Optional[pd.DataFrame]] = {}
+    with ThreadPoolExecutor(max_workers=40) as executor:
+        future_map = {executor.submit(_download_chunk, cs, ce): cs for cs, ce in chunks}
+        for future in as_completed(future_map):
+            cs = future_map[future]
+            try:
+                results[cs] = future.result()
+            except Exception as e:
+                print(f"❌ Treasury chunk {cs} 실패: {e}")
+                results[cs] = None
+
+    # 청크 순서대로 합치기
+    all_dfs = [results[cs] for cs, _ in chunks
+               if results.get(cs) is not None and not results[cs].empty]
+
+    if all_dfs:
+        merged = pd.concat(all_dfs, ignore_index=True)
+        merged = merged.drop_duplicates(subset=['date']).sort_values('date').reset_index(drop=True)
+    else:
+        merged = pd.DataFrame()
+
+    merged.to_json(final_path, orient='records', force_ascii=False, indent=4)
+    print(f"✅ [Merged] Treasury 총 {len(merged)}행 → {final_path}")
+    return merged

@@ -217,7 +217,7 @@ def get_market_cap_snapshot(
         return pd.DataFrame()
 
     # 2. 각 종목의 market_cap 파일에서 기준 날짜 데이터 추출
-    cutoff = (pd.to_datetime(date) + timedelta(days=2)).strftime('%Y-%m-%d')
+    cutoff = (pd.to_datetime(date) + timedelta(days=7)).strftime('%Y-%m-%d')
     rows = []
 
     # market_cap 폴더 파일 목록을 1회만 스캔해서 딕셔너리로 캐싱
@@ -248,7 +248,7 @@ def get_market_cap_snapshot(
         if len(error_idx) > 0:
             df = df.iloc[error_idx[-1]:]
 
-        # 기준 날짜 ± 2일 이내 데이터 추출 (가장 가까운 1행)
+        # 기준 날짜 ± 7일 이내 데이터 추출 (가장 가까운 1행)
         filtered = df[(df['date'] >= date) & (df['date'] <= cutoff)].tail(1)
         if not filtered.empty:
             rows.append(filtered)
