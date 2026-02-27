@@ -35,7 +35,7 @@ def _utc_now():
 
 def convert_fmp_date(val) -> Optional[date_type]:
     """FMP JSON의 date 필드를 Python date 객체로 변환."""
-    if val is None:
+    if val is None or val == "":
         return None
     if isinstance(val, (int, float)):
         return datetime.utcfromtimestamp(val / 1000).date()

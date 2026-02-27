@@ -6,14 +6,22 @@ from .data_fetcher import StockDataFetcher
 from .indicator_calculator import IndicatorCalculator
 from .pipeline import DataPipeline
 
+# FMP 전용
+from .fmp_db_models import (
+    FmpBase, FmpTicker, FmpDailyPrice, FmpMarketCap,
+    FmpFinancial, FmpTreasuryRate, FmpUniverseCalendar,
+    create_fmp_tables,
+)
+from .fmp_db_manager import FmpDatabaseManager
+
 __all__ = [
-    # Models
+    # yfinance Models
     'Base',
     'Ticker',
     'DailyPrice',
     'TechnicalIndicator',
     'create_tables',
-    # Database
+    # yfinance Database
     'DatabaseManager',
     # Data Fetching
     'StockDataFetcher',
@@ -21,4 +29,15 @@ __all__ = [
     'IndicatorCalculator',
     # Pipeline
     'DataPipeline',
+    # FMP Models
+    'FmpBase',
+    'FmpTicker',
+    'FmpDailyPrice',
+    'FmpMarketCap',
+    'FmpFinancial',
+    'FmpTreasuryRate',
+    'FmpUniverseCalendar',
+    'create_fmp_tables',
+    # FMP Database
+    'FmpDatabaseManager',
 ]
