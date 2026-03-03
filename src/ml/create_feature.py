@@ -37,15 +37,22 @@ create_feature.py
 """
 
 import os
-import json
-import glob
 import warnings
 import multiprocessing as mp
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Optional, Tuple
 
+from src.data.fmp_db_manager import FmpDatabaseManager
+from src.data.fmp_db_models import FINANCIAL_COLUMN_MAP_REVERSE
+
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+# ── DB snake_case → JSON camelCase 컬럼 매핑 (팩터 계산 코드 호환) ──────────
+_PRICE_DB_RENAME = {"close": "adj_close"}
+_MCAP_DB_RENAME = {"market_cap": "marketCap"}
+_TREASURY_DB_RENAME = {"month_3": "month3"}
+_FINANCIAL_META_RENAME = {"filing_date": "filingDate"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -360,15 +367,6 @@ def _to_date(val) -> Optional[pd.Timestamp]:
     return pd.Timestamp(s[:10])  # "YYYY-MM-DD HH:MM:SS" → 날짜만
 
 
-def _load_json(path: str) -> Optional[list]:
-    """JSON 파일 로드. 실패 시 None 반환."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
 def _sector_zscore(series: pd.Series, sector_map: pd.Series) -> pd.Series:
     """
     섹터별 Z-score 계산.
@@ -398,147 +396,69 @@ def _sector_zscore(series: pd.Series, sector_map: pd.Series) -> pd.Series:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class _DataLoader:
-    """FMP 데이터 폴더에서 각 종목의 데이터를 로드하는 내부 클래스."""
+    """사전 로드된 데이터를 보관하는 data holder (IO 없음).
 
-    def __init__(self, data_dir: str):
-        self.data_dir = data_dir
-        self._price_cache:   Dict[str, Optional[pd.DataFrame]] = {}
-        self._mcap_cache:    Dict[str, Optional[pd.DataFrame]] = {}
-        self._fin_cache:     Dict[str, Optional[pd.DataFrame]] = {}
-        self._profile_cache: Dict[str, dict] = {}
+    DB에서 벌크 로드한 DataFrame들을 받아 저장하고,
+    팩터 계산 함수들이 기존 인터페이스로 접근할 수 있도록 한다.
+    """
 
-    # ── 회사 프로필 ──────────────────────────────────────────────────────────
+    def __init__(
+        self,
+        *,
+        price_df: Optional[pd.DataFrame] = None,
+        mcap_df: Optional[pd.DataFrame] = None,
+        fin_df: Optional[pd.DataFrame] = None,
+        profile: Optional[dict] = None,
+        treasury_df: Optional[pd.DataFrame] = None,
+    ):
+        self._price_df = price_df
+        self._mcap_df = mcap_df
+        self._fin_df = fin_df
+        self._profile = profile or {}
+        self._treasury_df = treasury_df
+
     def load_profile(self, ticker: str) -> dict:
-        if ticker in self._profile_cache:
-            return self._profile_cache[ticker]
-        path = os.path.join(self.data_dir, "company_profile", f"{ticker}.json")
-        data = _load_json(path)
-        profile = {}
-        if data:
-            row = data[0] if isinstance(data, list) else data
-            profile = {
-                "industry": row.get("industry") or "",
-                "sector":   row.get("sector")   or "",
-            }
-        self._profile_cache[ticker] = profile
-        return profile
+        return self._profile
 
-    # ── Treasury 금리 데이터 ──────────────────────────────────────────────
     def load_treasury(self) -> Optional[pd.DataFrame]:
-        """Treasury 금리 파일 로드 (가장 최신 파일 사용)."""
-        if "treasury" in self._profile_cache:  # 임시 키로 캐싱
-            return self._profile_cache["treasury"]
+        return self._treasury_df
 
-        treasury_dir = os.path.join(self.data_dir, "treasury")
-        if not os.path.isdir(treasury_dir):
-            self._profile_cache["treasury"] = None
-            return None
-
-        files = [f for f in os.listdir(treasury_dir)
-                 if f.startswith("treasury_") and f.endswith(".json")]
-        if not files:
-            self._profile_cache["treasury"] = None
-            return None
-
-        files.sort(key=lambda p: p.split("_to_")[-1])
-        data = _load_json(os.path.join(treasury_dir, files[-1]))
-        if not data:
-            self._profile_cache["treasury"] = None
-            return None
-
-        df = pd.DataFrame(data)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").reset_index(drop=True)
-        self._profile_cache["treasury"] = df
-        return df
-
-    # ── 가격 데이터 ──────────────────────────────────────────────────────────
     def load_price(self, ticker: str) -> Optional[pd.DataFrame]:
-        if ticker in self._price_cache:
-            return self._price_cache[ticker]
+        return self._price_df
 
-        pattern = os.path.join(
-            self.data_dir, "price", "ticker", f"{ticker}_*_to_*.json"
-        )
-        files = glob.glob(pattern)
-        if not files:
-            self._price_cache[ticker] = None
-            return None
-
-        # end_date 가장 최신 파일 선택
-        files.sort(key=lambda p: os.path.basename(p).split("_to_")[-1])
-        data = _load_json(files[-1])
-        if not data:
-            self._price_cache[ticker] = None
-            return None
-
-        df = pd.DataFrame(data)
-        df["date"] = pd.to_datetime(df["date"], unit="ms")
-        df = df.sort_values("date").reset_index(drop=True)
-        # adjClose 없으므로 close를 adj_close로 사용
-        df = df.rename(columns={"close": "adj_close"})
-        self._price_cache[ticker] = df
-        return df
-
-    # ── 시가총액 데이터 ──────────────────────────────────────────────────────
     def load_mcap(self, ticker: str) -> Optional[pd.DataFrame]:
-        if ticker in self._mcap_cache:
-            return self._mcap_cache[ticker]
+        return self._mcap_df
 
-        pattern = os.path.join(
-            self.data_dir, "market_cap", f"{ticker}_*_to_*.json"
-        )
-        files = glob.glob(pattern)
-        if not files:
-            self._mcap_cache[ticker] = None
-            return None
-
-        files.sort(key=lambda p: os.path.basename(p).split("_to_")[-1])
-        data = _load_json(files[-1])
-        if not data:
-            self._mcap_cache[ticker] = None
-            return None
-
-        df = pd.DataFrame(data)
-        df["date"] = pd.to_datetime(df["date"], unit="ms")
-        df = df.sort_values("date").reset_index(drop=True)
-        self._mcap_cache[ticker] = df
-        return df
-
-    # ── 재무제표 데이터 ──────────────────────────────────────────────────────
     def load_financial(self, ticker: str) -> Optional[pd.DataFrame]:
-        if ticker in self._fin_cache:
-            return self._fin_cache[ticker]
+        return self._fin_df
 
-        pattern = os.path.join(
-            self.data_dir, "financial", "ticker", ticker, "all_financial_*.json"
-        )
-        files = glob.glob(pattern)
-        if not files:
-            self._fin_cache[ticker] = None
-            return None
 
-        files.sort()
-        data = _load_json(files[-1])
-        if not data:
-            self._fin_cache[ticker] = None
-            return None
+def _prepare_financial_df(fin_df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """DB에서 로드한 financial DataFrame을 팩터 계산 호환 형식으로 변환.
 
-        df = pd.DataFrame(data)
+    변환 내용:
+    1. snake_case → camelCase 컬럼 rename (FINANCIAL_COLUMN_MAP_REVERSE)
+    2. filing_date → filingDate rename
+    3. period_end 생성 (date 컬럼)
+    4. filing_date_pit 생성 (filingDate, 없으면 period_end + 90일)
+    5. period_end 내림차순 정렬
+    """
+    if fin_df is None or fin_df.empty:
+        return None
 
-        # 분기 말일: Unix ms → Timestamp
-        df["period_end"] = pd.to_datetime(df["date"], unit="ms")
+    df = fin_df.rename(columns=FINANCIAL_COLUMN_MAP_REVERSE)
+    df = df.rename(columns=_FINANCIAL_META_RENAME)
 
-        # filingDate: 문자열 → Timestamp. 없으면 period_end + 90일 (PIT 보수적 lag)
-        df["filing_date_pit"] = df["filingDate"].apply(_to_date)
-        no_filing = df["filing_date_pit"].isna()
-        df.loc[no_filing, "filing_date_pit"] = (
-            df.loc[no_filing, "period_end"] + pd.Timedelta(days=90)
-        )
+    df["period_end"] = pd.to_datetime(df["date"])
 
-        df = df.sort_values("period_end", ascending=False).reset_index(drop=True)
-        self._fin_cache[ticker] = df
-        return df
+    df["filing_date_pit"] = df["filingDate"].apply(_to_date)
+    no_filing = df["filing_date_pit"].isna()
+    df.loc[no_filing, "filing_date_pit"] = (
+        df.loc[no_filing, "period_end"] + pd.Timedelta(days=90)
+    )
+
+    df = df.sort_values("period_end", ascending=False).reset_index(drop=True)
+    return df
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -585,20 +505,29 @@ def _get_pit_financials(
         return None
 
     # ── 검증 1: 최신 분기 존재 여부 ──────────────────────────────────────────
+    # 재무제표는 분기 종료 후 45~90일 뒤에 공시됨.
+    # 따라서 as_of_date 기준으로 "공시 가능했을 최신 분기"는
+    # 직전 분기(~1분기 전)이다.
+    # 예: as_of_date=6/30 → Q2 보고서는 아직 미공시 → Q1(3/31)이 최신 기대값
     year = as_of_date.year
     quarter_ends = [
+        pd.Timestamp(year - 1, 3, 31),
+        pd.Timestamp(year - 1, 6, 30),
+        pd.Timestamp(year - 1, 9, 30),
+        pd.Timestamp(year - 1, 12, 31),
         pd.Timestamp(year, 3, 31),
         pd.Timestamp(year, 6, 30),
         pd.Timestamp(year, 9, 30),
         pd.Timestamp(year, 12, 31),
     ]
-    past_ends = [d for d in quarter_ends if d <= as_of_date]
-    if not past_ends:
-        past_ends = [pd.Timestamp(year - 1, 12, 31)]
-    expected_latest = max(past_ends)
+    # 공시 lag 고려: as_of_date 기준 최소 45일 전에 종료된 분기가 기대 최신
+    candidate_ends = [d for d in quarter_ends if d <= as_of_date - pd.Timedelta(days=45)]
+    if not candidate_ends:
+        candidate_ends = [pd.Timestamp(year - 1, 12, 31)]
+    expected_latest = max(candidate_ends)
 
     actual_latest = valid["period_end"].iloc[0]
-    if abs((actual_latest - expected_latest).days) > 15:
+    if abs((actual_latest - expected_latest).days) > 20:
         if _cache is not None:
             _cache[(as_of_date, n_quarters)] = None
         return None
@@ -917,43 +846,33 @@ def _calc_market_factor(
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _calc_raw_for_ticker(
-    args: Tuple[str, List[pd.Timestamp], str, Dict[pd.Timestamp, float]],
+    args: Tuple[str, List[pd.Timestamp], dict, Dict[pd.Timestamp, float]],
 ) -> List[Dict]:
     """
     단일 ticker에 대해 여러 날짜의 raw 팩터를 계산한다.
 
     multiprocessing.Pool.map에서 호출되므로 module-level 함수여야 함.
-    _DataLoader를 Worker 내부에서 생성해 파일 IO를 ticker당 1번으로 유지.
+    메인 프로세스에서 DB 벌크 로드한 데이터를 dict로 받아 _DataLoader를 구성.
 
     Parameters
     ----------
-    args : (ticker, dates, data_dir, market_ret_map)
+    args : (ticker, dates, loader_data, market_ret_map)
         ticker         : 종목 심볼
         dates          : 계산할 날짜 목록 (pd.Timestamp)
-        data_dir       : FMP 데이터 루트 경로
+        loader_data    : _DataLoader 생성용 dict (price_df, mcap_df, fin_df, profile, treasury_df)
         market_ret_map : {date: market_excess_return} (메인 프로세스에서 미리 계산)
 
     Returns
     -------
     List[Dict] : 날짜별 raw 팩터 딕셔너리 목록
     """
-    ticker, dates, data_dir, market_ret_map = args
-    loader = _DataLoader(data_dir)
+    ticker, dates, loader_data, market_ret_map = args
+    loader = _DataLoader(**loader_data)
 
-    # 파일 IO: ticker 데이터 한 번만 로드 (이후 캐시 히트)
     profile  = loader.load_profile(ticker)
     industry = profile.get("industry", "")
     sector   = profile.get("sector",   "")
     gics_l2  = GICS_MAP.get(industry, "Other")
-
-    # ── Option B: 재무제표 pre-filter ──────────────────────────────────────
-    # fin_df는 load_financial()에서 이미 period_end 내림차순 정렬되어 있음.
-    # 날짜 루프 전에 전체 기간 중 가장 이른 as_of_date까지의 데이터를 잘라두면
-    # 루프 내에서 _get_pit_financials가 매번 전체 fin_df를 스캔하지 않아도 됨.
-    # 단, 각 날짜별로 filing_date_pit 필터 기준이 다르므로 루프 내 필터는 유지.
-    # 여기서는 fin_df를 한 번만 로드해두고 (캐시), 각 날짜별 _cache dict를 사용.
-    # _cache는 날짜별로 독립적으로 생성 → (as_of_date, n_quarters) 키 충돌 없음.
-    _ = loader.load_financial(ticker)   # fin_df 미리 캐시에 올려두기
 
     rows = []
     for t in dates:
@@ -1064,22 +983,99 @@ class FeatureCreator:
     def __init__(
         self,
         data_dir:     str = "/app/data/fmp",
+        db_path:      str = "/app/data/database/fmp_stocks.db",
         market_proxy: str = "SPY",
         n_workers:    int = -1,
     ):
         self.data_dir     = data_dir
+        self.db_path      = db_path
         self.market_proxy = market_proxy
         self.n_workers    = os.cpu_count() if n_workers < 1 else n_workers
-        self._loader      = _DataLoader(data_dir)  # 단일 날짜 compute용
 
-    # ── 내부: 시장 팩터를 날짜 목록에 대해 일괄 계산 ────────────────────────
+    # ── 내부: DB에서 전체 데이터를 벌크 로드 ────────────────────────────────
+    def _bulk_load_all_data(
+        self,
+        ticker_list: List[str],
+        dates: List[pd.Timestamp],
+    ) -> Dict[str, dict]:
+        """DB에서 전체 ticker 데이터를 일괄 로드하여 ticker별 dict로 반환.
+
+        Returns
+        -------
+        Dict[str, dict]
+            {ticker: {"price_df": ..., "mcap_df": ..., "fin_df": ...,
+                       "profile": ..., "treasury_df": ...}}
+        """
+        # 날짜 범위: 모멘텀/변동성 lookback (253 거래일 ≈ 400 캘린더일) + 여유
+        start_date = (min(dates) - pd.Timedelta(days=450)).strftime("%Y-%m-%d")
+        end_date = max(dates).strftime("%Y-%m-%d")
+
+        all_symbols = sorted(set(ticker_list) | {self.market_proxy})
+
+        print(f"  DB 벌크 로드 시작: {len(all_symbols)}개 심볼, "
+              f"기간 {start_date} ~ {end_date}", flush=True)
+
+        with FmpDatabaseManager(db_path=self.db_path) as db:
+            prices_dict = db.load_prices_bulk(all_symbols, start_date, end_date)
+            mcaps_dict = db.load_market_caps_bulk(all_symbols, start_date, end_date)
+            fins_dict = db.load_financials_bulk(all_symbols)
+            treasury_df = db.load_treasury_rates(start_date, end_date)
+            metadata_df = db.load_ticker_metadata(all_symbols)
+
+        # Treasury 컬럼 rename
+        treasury_df = treasury_df.rename(columns=_TREASURY_DB_RENAME)
+
+        # ticker별 데이터 dict 구성
+        ticker_data_map: Dict[str, dict] = {}
+        for sym in all_symbols:
+            # Price: close → adj_close
+            price_df = prices_dict.get(sym)
+            if price_df is not None and not price_df.empty:
+                price_df = price_df.rename(columns=_PRICE_DB_RENAME)
+            else:
+                price_df = None
+
+            # Market cap: market_cap → marketCap
+            mcap_df = mcaps_dict.get(sym)
+            if mcap_df is not None and not mcap_df.empty:
+                mcap_df = mcap_df.rename(columns=_MCAP_DB_RENAME)
+            else:
+                mcap_df = None
+
+            # Financials: snake_case → camelCase + period_end/filing_date_pit 생성
+            fin_df = _prepare_financial_df(fins_dict.get(sym))
+
+            # Profile
+            profile = {}
+            if sym in metadata_df.index:
+                row = metadata_df.loc[sym]
+                profile = {
+                    "industry": row.get("industry") or "",
+                    "sector":   row.get("sector")   or "",
+                }
+
+            ticker_data_map[sym] = {
+                "price_df":    price_df,
+                "mcap_df":     mcap_df,
+                "fin_df":      fin_df,
+                "profile":     profile,
+                "treasury_df": treasury_df,
+            }
+
+        print(f"  DB 벌크 로드 완료: price={len(prices_dict)}, "
+              f"mcap={len(mcaps_dict)}, fin={len(fins_dict)}, "
+              f"treasury={len(treasury_df)}행", flush=True)
+
+        return ticker_data_map
+
     def _build_market_ret_map(
         self,
         dates: List[pd.Timestamp],
+        ticker_data_map: Dict[str, dict],
     ) -> Dict[pd.Timestamp, float]:
         """SPY market_excess_return을 날짜별로 미리 계산해 dict로 반환."""
-        loader = _DataLoader(self.data_dir)
-        return {t: _calc_market_factor(loader, t, self.market_proxy) for t in dates}
+        spy_loader = _DataLoader(**ticker_data_map[self.market_proxy])
+        return {t: _calc_market_factor(spy_loader, t, self.market_proxy) for t in dates}
 
     # ── 단일 날짜 계산 (외부 인터페이스 유지) ────────────────────────────────
     def compute(
@@ -1143,14 +1139,18 @@ class FeatureCreator:
         """
         dates = [pd.Timestamp(d) for d in rebalance_dates]
 
+        # ── Phase 0: DB에서 전체 데이터 벌크 로드 ─────────────────────────────
+        ticker_data_map = self._bulk_load_all_data(ticker_list, dates)
+
         # ── Phase 1-0: 시장 팩터 (SPY) 날짜별 사전 계산 ─────────────────────
         # SPY는 모든 종목 공통값 → 메인 프로세스에서 1번만 계산해 Worker에 전달
-        market_ret_map = self._build_market_ret_map(dates)
+        market_ret_map = self._build_market_ret_map(dates, ticker_data_map)
 
         # ── Phase 1: ticker별 병렬 raw 팩터 계산 ─────────────────────────────
         worker_args = [
-            (ticker, dates, self.data_dir, market_ret_map)
+            (ticker, dates, ticker_data_map[ticker], market_ret_map)
             for ticker in ticker_list
+            if ticker in ticker_data_map
         ]
 
         n_workers = min(self.n_workers, len(ticker_list))

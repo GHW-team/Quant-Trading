@@ -826,6 +826,138 @@ class FmpDatabaseManager:
         return df
 
     # ──────────────────────────────────────────────────────────────────────
+    # BULK LOAD: 전체 심볼 일괄 로드 (성능 최적화)
+    # ──────────────────────────────────────────────────────────────────────
+    _SQLITE_CHUNK = 900  # SQLite SQLITE_MAX_VARIABLE_NUMBER 대응
+
+    def load_prices_bulk(
+        self,
+        symbols: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """전체 심볼의 가격 데이터를 단일(또는 청크) SQL 쿼리로 일괄 로드."""
+        all_dfs = []
+        for i in range(0, len(symbols), self._SQLITE_CHUNK):
+            chunk_syms = symbols[i : i + self._SQLITE_CHUNK]
+            stmt = (
+                select(
+                    FmpTicker.symbol,
+                    FmpDailyPrice.date,
+                    FmpDailyPrice.open,
+                    FmpDailyPrice.high,
+                    FmpDailyPrice.low,
+                    FmpDailyPrice.close,
+                    FmpDailyPrice.volume,
+                    FmpDailyPrice.change,
+                    FmpDailyPrice.change_percent,
+                    FmpDailyPrice.vwap,
+                )
+                .join(FmpTicker, FmpTicker.ticker_id == FmpDailyPrice.ticker_id)
+                .where(FmpTicker.symbol.in_(chunk_syms))
+            )
+            if start_date:
+                stmt = stmt.where(FmpDailyPrice.date >= start_date)
+            if end_date:
+                stmt = stmt.where(FmpDailyPrice.date <= end_date)
+            stmt = stmt.order_by(FmpTicker.symbol, FmpDailyPrice.date)
+            all_dfs.append(pd.read_sql(stmt, self.engine, parse_dates=["date"]))
+
+        if not all_dfs:
+            return {}
+        df = pd.concat(all_dfs, ignore_index=True)
+        logger.info(f"Bulk loaded {len(df)} price rows for {df['symbol'].nunique()} tickers")
+        return {
+            sym: grp.drop(columns=["symbol"]).reset_index(drop=True)
+            for sym, grp in df.groupby("symbol")
+        }
+
+    def load_market_caps_bulk(
+        self,
+        symbols: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """전체 심볼의 시가총액 데이터를 일괄 로드."""
+        all_dfs = []
+        for i in range(0, len(symbols), self._SQLITE_CHUNK):
+            chunk_syms = symbols[i : i + self._SQLITE_CHUNK]
+            stmt = (
+                select(
+                    FmpTicker.symbol,
+                    FmpMarketCap.date,
+                    FmpMarketCap.market_cap,
+                )
+                .join(FmpTicker, FmpTicker.ticker_id == FmpMarketCap.ticker_id)
+                .where(FmpTicker.symbol.in_(chunk_syms))
+            )
+            if start_date:
+                stmt = stmt.where(FmpMarketCap.date >= start_date)
+            if end_date:
+                stmt = stmt.where(FmpMarketCap.date <= end_date)
+            stmt = stmt.order_by(FmpTicker.symbol, FmpMarketCap.date)
+            all_dfs.append(pd.read_sql(stmt, self.engine, parse_dates=["date"]))
+
+        if not all_dfs:
+            return {}
+        df = pd.concat(all_dfs, ignore_index=True)
+        logger.info(f"Bulk loaded {len(df)} mcap rows for {df['symbol'].nunique()} tickers")
+        return {
+            sym: grp.drop(columns=["symbol"]).reset_index(drop=True)
+            for sym, grp in df.groupby("symbol")
+        }
+
+    def load_financials_bulk(
+        self,
+        symbols: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """전체 심볼의 재무제표 데이터를 일괄 로드."""
+        fin_columns = [
+            getattr(FmpFinancial, col)
+            for col in FINANCIAL_COLUMN_MAP.values()
+            if hasattr(FmpFinancial, col)
+        ]
+
+        all_dfs = []
+        for i in range(0, len(symbols), self._SQLITE_CHUNK):
+            chunk_syms = symbols[i : i + self._SQLITE_CHUNK]
+            stmt = (
+                select(
+                    FmpTicker.symbol,
+                    FmpFinancial.date,
+                    FmpFinancial.period,
+                    FmpFinancial.fiscal_year,
+                    FmpFinancial.reported_currency,
+                    FmpFinancial.filing_date,
+                    FmpFinancial.accepted_date,
+                    *fin_columns,
+                )
+                .join(FmpTicker, FmpTicker.ticker_id == FmpFinancial.ticker_id)
+                .where(FmpTicker.symbol.in_(chunk_syms))
+            )
+            if start_date:
+                stmt = stmt.where(FmpFinancial.date >= start_date)
+            if end_date:
+                stmt = stmt.where(FmpFinancial.date <= end_date)
+            stmt = stmt.order_by(FmpTicker.symbol, FmpFinancial.date)
+            all_dfs.append(
+                pd.read_sql(stmt, self.engine, parse_dates=["date", "filing_date"])
+            )
+
+        if not all_dfs:
+            return {}
+        df = pd.concat(all_dfs, ignore_index=True)
+        logger.info(
+            f"Bulk loaded {len(df)} financial rows for {df['symbol'].nunique()} tickers"
+        )
+        return {
+            sym: grp.drop(columns=["symbol"]).reset_index(drop=True)
+            for sym, grp in df.groupby("symbol")
+        }
+
+    # ──────────────────────────────────────────────────────────────────────
     # 리소스 정리
     # ──────────────────────────────────────────────────────────────────────
     def close(self):
