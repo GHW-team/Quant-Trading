@@ -1,0 +1,43 @@
+barra_pipeline:
+  # ── 데이터 경로 ──
+  feature_csv: "data/fmp/features_backtest_2010_2020.csv"
+  db_path: "data/database/fmp_stocks.db"
+  market_proxy: "SPY"
+
+  # ── Step 1: OLS 시계열 회귀 (베타 추정) ──
+  ols:
+    lookback_months: 36       # a = 36개월 (월별 수익률 기준)
+    min_observations: 12      # 최소 관측치 수 (이보다 적으면 beta=1.0)
+    vif_threshold: 10.0       # VIF 임계값 (다중 팩터 확장 시)
+    ridge_alpha: 1.0          # Ridge 회귀 alpha (VIF 초과 시)
+
+  # ── Step 2: 알파 기반 라벨링 ──
+  labeling:
+    target_ratio: 0.3         # c = 상위 30% → 라벨 1
+
+  # ── Step 3: 로지스틱 회귀 ──
+  logistic:
+    interaction_types:
+      - "style_style"         # 스타일 × 스타일 (28개)
+      - "industry_style"      # 산업 × 스타일 (192개)
+      - "market_style"        # 시장 × 스타일 (8개)
+      - "market_industry"     # 시장 × 산업 (24개)
+    penalty_search:
+      - "l1"
+      - "l2"
+      - "elasticnet"
+    C_search: [0.001, 0.01, 0.1, 1.0, 10.0]
+    l1_ratio_search: [0.1, 0.3, 0.5, 0.7, 0.9]
+    cv_splits: 5
+    max_iter: 5000
+
+  # ── Train/Test 분할 (날짜 기준) ──
+  split:
+    train_end: "2017-12-31"     # 학습 기간: ~2017
+    test_start: "2018-03-31"    # 테스트 기간: 2018~
+
+  # ── 출력 ──
+  output:
+    model_path: "models/barra_logistic_model.pkl"
+    beta_csv: "reports/barra_betas.csv"
+    label_csv: "reports/barra_labels.csv"

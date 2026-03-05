@@ -1,0 +1,247 @@
+startegy.txt와 startegy_coding.txt 를 읽고
+현재 내가 만드려는 ml퀀트 전략에 대해 파악해.
+
+나는 /app/src/data의 fmp관련 코드들을 활용하여
+  /app/data/fmp에 데이터를 저장했고,
+그 데이터를 이용하여 feature값들을 계산하는 코드를
+/app/src/ml/create_feature.py 에 구현했어.
+
+이제 그 계산된 feature값에 대해 
+
+        : 초과수익률 = b0(시장) + b1(산업) + b2(스타일)
+            : 초과수익률 = R_i - R_f
+
+위 식을 활용하여 ml을 적용할거야. 
+순서대로 말하자면
+
+1. a개월 과거 데이터를 활용하여 [초과수익률 = b0(시장) + b1(산업) + b2(스타일)]
+위 식에 대해 각 팩터의 민감도를 알아낼거야. 
+이때, 피쳐 확장은 사용 안할거고, 정규화도 아마 사용 안할거야.
+다만, 다중공진성 검사를 통해 다중공진성이 관찰되면 l2까지는 적용해도 될거같아. 
+
+
+2.알아낸 민감도를 사용하여 b개월 뒤 값에 대해,
+미래 총 수익률 - b0(비래 시장 수익률) > C 방식으로 라벨링 한뒤, 
+라벨 1과0의 비율이 특정 비율 c가 되도록 C값을 조절하여 라벨링 할거야
+
+3. 라벨링 된 값에 대해 [라벨 =  b0(시장) + b1(산업) + b2(스타일)]로지스틱 회귀를 할거야. 
+이때, 
+        : 차원 확장
+            1.스타일 x 스타일
+            2.산업 x 스타일
+            3.시장 x 스타일
+            4.시장 x 산업
+        : 정규화: L1 or L2 or (L1+L2)
+위 기법들을 사용하여 정확성을 높일게.
+
+## 궁금한 점 ##
+1. a값을 어떻게 할지. 과거 몇개월, 몇년에 대해 하는게 적절한지
+2. b값을 어떻게 할지. 리밸런싱주기에 맞추는건지 아니면 그냥 기간 절대값을 사용하는건지 어떤 기준으로 설정할지
+3. c값을 어떻게할지. 라벨 1,0 비율을 반반으로하는게 무조건 좋은지. 아니면 특정 기준으로 정하는게 좋을지
+
+
+위 과정을 구현할 계획을 세워줘. 
+
+또한, 이론적으로 잘못됐거나, 개선사항이 있거나 한 부분이 있다면 나한테 제시해줘.
+
+
+
+
+
+
+
+
+
+
+Barra 기반 ML 퀀트 파이프라인 구현 계획
+Context
+현재 create_feature.py에서 Barra 모델의 팩터(시장/산업/스타일)를 계산하여 features_backtest_2010_2020.csv에 저장한 상태.
+이제 이 팩터를 활용하여 3단계 ML 파이프라인을 구현한다:
+
+OLS 회귀로 팩터 민감도(베타) 추정
+추정된 베타로 알파 기반 라벨링
+교차항 포함 로지스틱 회귀로 매수 신호 예측
+이론적 피드백 (구현 전 확인 필요)
+1. 회귀 방식에 대한 명확화
+Barra 모델에서 초과수익률 = b0(시장) + b1(산업) + b2(스타일) 식의 해석이 두 가지가 있다:
+
+횡단면 회귀(Cross-sectional): 한 시점에 모든 종목을 놓고 회귀 → **팩터 수익률(factor return)**을 추정. b0,b1,b2는 팩터가 가져다주는 수익률.
+시계열 회귀(Time-series): 한 종목의 여러 시점 데이터로 회귀 → **종목별 팩터 민감도(beta)**를 추정. b0,b1,b2는 해당 종목이 각 팩터에 얼마나 민감한지.
+라벨링에서 수익률 - b0 × 시장수익률 > C를 하려면 종목별 시장 베타가 필요하다. 이는 시계열 회귀로 추정해야 한다.
+
+확정: 각 종목에 대해 과거 a개월간의 월별 수익률을 시장 수익률에 대해 종목별 시계열 회귀 → 종목별 market beta 추정. DB의 일별 가격에서 월별 수익률을 계산하여 사용. 분기 데이터(8개 포인트)로는 부족하므로 월별 수익률 데이터를 사용하여 최소 2436개 관측치를 확보.
+
+2. 라벨링 식의 의미
+alpha_proxy = R_stock - beta_market × R_market은 Jensen's Alpha 와 동일한 개념. 시장 효과를 제거한 뒤 남는 초과 성과를 포착하는 것이므로 이론적으로 올바르다.
+
+3. 로지스틱 회귀 feature 구성
+확정: 시장 팩터(market_excess_return) 포함. 시장 상황에 따라 알파 예측이 달라질 수 있다는 가설. 교차항(market×style, market×industry)도 생성.
+
+4. 교차항(Interaction) 차원 폭발
+스타일 8개 × 산업 24개 = 192개 교차항 → 희소(sparse). L1 정규화가 필수.
+총 feature 수 ~285개 vs 분기당 ~1,700종목 → 전체 학습 데이터 풀링 시(32분기 × 1,700 = ~54,000행) 충분하나, CV 폴드에서는 주의 필요.
+a, b, c 파라미터 권장값
+파라미터	의미	권장값	근거
+a (lookback)	베타 추정 과거 기간	24~36개월 (월별 수익률 기준)	시계열 회귀에 최소 24개 관측치 필요. 36개월이 안정적. 너무 길면 구조 변화 반영 못함.
+b (horizon)	라벨링 미래 기간	3개월 (1분기)	리밸런싱 주기(분기)와 일치. 다음 리밸런싱 시점의 수익률로 라벨링하는 것이 자연스러움.
+c (label ratio)	라벨 1의 비율	0.3 (상위 30%)	50:50은 선별력이 약하고, 10%는 데이터 불균형 심각. 20~30%가 퀀트 업계 표준. 30%로 시작 후 실험 권장.
+구현 계획
+파일 구조
+
+/app/src/ml/
+├── create_feature.py          # 기존 (수정 없음)
+├── return_calculator.py       # 새로 생성: 수익률 계산
+├── barra_regression.py        # 새로 생성: OLS 베타 추정
+├── barra_labeler.py           # 새로 생성: 알파 기반 라벨링
+├── barra_logistic.py          # 새로 생성: 교차항 로지스틱 회귀
+├── logistic_regression.py     # 기존 (수정 없음)
+├── labeler.py                 # 기존 (수정 없음)
+
+/app/scripts/
+├── train_barra_model.py       # 새로 생성: 파이프라인 오케스트레이션
+
+/app/config/
+├── barra_config.yaml          # 새로 생성: Barra 파이프라인 설정
+Step 0: return_calculator.py - 수익률 계산기
+목적: OLS 종속변수(과거 수익률)와 라벨링용(미래 수익률) 수익률 계산
+
+핵심 로직:
+
+FmpDatabaseManager.load_prices_bulk()로 일별 가격 로드
+일별 가격 → 월말 종가 추출 → 월별 수익률 계산: R_t = P_t / P_{t-1} - 1
+분기 수익률(라벨링용): R_q = P_{quarter_end} / P_{prev_quarter_end} - 1
+시장(SPY) 수익률도 동일 방식으로 계산
+정확한 날짜에 가격 없으면 전후 5영업일 내 가장 가까운 거래일 사용
+월별 수익률은 베타 추정용(Step 1), 분기 수익률은 라벨링용(Step 2)
+기존 코드 재사용:
+
+FmpDatabaseManager (/app/src/data/fmp_db_manager.py): load_prices_bulk() 메서드 활용
+Treasury rate은 create_feature.py의 _market_factor() 로직 참고
+Step 1: barra_regression.py - OLS 베타 추정
+목적: 각 종목의 시장 베타(b0) 추정
+
+핵심 로직:
+
+
+각 리밸런싱 날짜 T, 각 종목 i에 대해:
+  과거 a개월간의 월별 데이터로:
+    R_i,t - R_f,t = alpha + beta_market × (R_m,t - R_f,t) + epsilon
+  → beta_market_i 추출
+구현 세부사항:
+
+statsmodels.OLS 사용 (t-stat, R² 등 진단 가능)
+종목별 시계열 회귀 (종목당 a개의 월별 관측치)
+VIF 검사: 다중 팩터 모델로 확장 시 활용 (statsmodels.stats.outliers_influence.variance_inflation_factor)
+VIF > 10이면 Ridge 회귀로 전환 (sklearn.linear_model.Ridge)
+관측치 부족(< 12개월) 종목은 beta = 1.0 기본값 적용
+출력: DataFrame [rebalance_date, symbol, beta_market, r_squared, n_obs]
+
+Step 2: barra_labeler.py - 알파 기반 라벨링
+목적: 시장 효과 제거 후 알파가 높은 종목 라벨링
+
+핵심 로직:
+
+
+각 리밸런싱 날짜 T, 각 종목 i에 대해:
+  alpha_proxy_i = R_i(T→T+b) - beta_i × R_m(T→T+b)
+
+  C = quantile(alpha_proxy, 1 - c)  # 상위 c%의 경계값
+  label_i = 1 if alpha_proxy_i > C else 0
+구현 세부사항:
+
+각 리밸런싱 날짜별로 독립적으로 C 계산 (시점마다 시장 상황 다름)
+NaN 처리: beta 또는 수익률 없는 종목은 라벨링에서 제외
+통계 로깅: 각 날짜별 C값, 1/0 비율, alpha_proxy 분포
+출력: DataFrame [rebalance_date, symbol, alpha_proxy, label, threshold_C]
+
+Step 3: barra_logistic.py - 교차항 로지스틱 회귀
+목적: 라벨 예측을 위한 로지스틱 회귀 (interaction term 포함)
+
+핵심 로직:
+
+Feature 구성:
+
+기본: 스타일 Z-score 8개 + 산업 더미 24개 (1개 제거)
+교차항 생성:
+style × style: itertools.combinations(style_z_cols, 2) → 28개
+industry × style: 산업더미 × 스타일Z → 192개 (희소)
+market × style: market_excess_return × 스타일Z → 8개
+market × industry: market_excess_return × 산업더미 → 24개
+총 ~284개 feature
+모델 학습:
+
+sklearn.linear_model.LogisticRegression(solver='saga') - L1/L2/ElasticNet 모두 지원
+GridSearchCV + TimeSeriesSplit(n_splits=5)
+탐색 공간:
+penalty: ['l1', 'l2', 'elasticnet']
+C: [0.001, 0.01, 0.1, 1.0, 10.0]
+l1_ratio (elasticnet): [0.1, 0.3, 0.5, 0.7, 0.9]
+StandardScaler 적용 (교차항 포함 전체에)
+NaN 처리: 스타일 Z-score NaN은 0으로 대체 (Z-score 0 = 평균 노출)
+
+기존 코드 패턴 재사용:
+
+LogisticRegressionHandler의 train/evaluate/predict/save/load 구조 동일하게 유지
+출력: 학습된 모델 (joblib.dump)
+
+Step 4: train_barra_model.py - 오케스트레이션 스크립트
+실행 순서:
+
+
+1. 설정 로드 (barra_config.yaml)
+2. feature CSV 로드
+3. ReturnCalculator로 월별/분기별 수익률 계산
+4. BarraRegression으로 종목별 market beta 추정
+5. BarraLabeler로 알파 기반 라벨 생성
+6. 날짜 기준 Train/Test 분할 (2010~2017 / 2018~2020)
+7. BarraLogisticHandler로 학습 + GridSearchCV
+8. 테스트셋 평가 (accuracy, precision, recall, F1)
+9. 모델 및 결과 저장
+Step 5: barra_config.yaml - 설정 파일
+
+barra_pipeline:
+  feature_csv: "data/fmp/features_backtest_2010_2020.csv"
+  db_path: "data/database/fmp_stocks.db"
+  market_proxy: "SPY"
+
+  ols:
+    lookback_months: 36       # a = 36개월
+    min_observations: 12      # 최소 관측치
+    vif_threshold: 10.0
+    ridge_alpha: 1.0
+
+  labeling:
+    horizon_months: 3         # b = 3개월 (1분기)
+    target_ratio: 0.3         # c = 상위 30%
+
+  logistic:
+    interaction_types: ["style_style", "industry_style", "market_style", "market_industry"]
+    penalty_search: ["l1", "l2", "elasticnet"]
+    C_search: [0.001, 0.01, 0.1, 1.0, 10.0]
+    l1_ratio_search: [0.1, 0.3, 0.5, 0.7, 0.9]
+    cv_splits: 5
+    max_iter: 5000
+
+  split:
+    train_end: "2017-12-31"
+    test_start: "2018-03-31"
+
+  output:
+    model_path: "models/barra_logistic_model.pkl"
+    beta_csv: "reports/barra_betas.csv"
+    label_csv: "reports/barra_labels.csv"
+검증 방법
+Step 1 검증: beta 분포 확인 (대부분 0.51.5 범위), R² 확인 (0.10.5 정상)
+Step 2 검증: 각 분기별 라벨 1 비율이 target_ratio(30%)에 근접하는지 확인
+Step 3 검증:
+Test set classification report (precision/recall/F1)
+학습된 coefficient 확인 - L1으로 어떤 교차항이 살아남았는지
+Walk-forward로 분기별 정확도 추이 확인
+전체 파이프라인: python scripts/train_barra_model.py 실행 후 로그 및 결과 파일 확인
+구현 순서
+return_calculator.py (의존성 없음)
+barra_regression.py (return_calculator 사용)
+barra_labeler.py (return_calculator + barra_regression 사용)
+barra_logistic.py (독립적)
+barra_config.yaml (독립적)
+train_barra_model.py (모든 모듈 통합)
